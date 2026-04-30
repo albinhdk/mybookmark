@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>搜索功能调试</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .search-box {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        .search-box.search-active {
+            border-color: #4a90e2;
+            background: rgba(74, 144, 226, 0.05);
+        }
+        .search-box.search-no-results {
+            border-color: #ff6b6b;
+            background: rgba(255, 107, 107, 0.05);
+        }
+        .bookmark-item, .folder-item {
+            padding: 12px;
+            margin: 8px 0;
+            background: #f9f9f9;
+            border-radius: 4px;
+            border: 1px solid #eee;
+        }
+        .hidden-by-search {
+            display: none !important;
+        }
+        .debug-info {
+            background: #f0f0f0;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>搜索功能调试</h1>
+        
+        <input type="text" id="search-box" class="search-box" placeholder="输入搜索词...">
+        
+        <div id="debug-info" class="debug-info">
+            调试信息将显示在这里...
+        </div>
+        
+        <div id="bookmarks">
+            <div class="bookmark-item">
+                <a href="https://www.bilibili.com" class="bookmark-link">
+                    <img src="https://www.bilibili.com/favicon.ico" width="16" height="16" alt="">
+                    哔哩哔哩 (゜-゜)つロ 干杯~-bilibili
+                </a>
+            </div>
+            
+            <div class="bookmark-item">
+                <a href="https://www.baidu.com" class="bookmark-link">
+                    <img src="https://www.baidu.com/favicon.ico" width="16" height="16" alt="">
+                    百度一下，你就知道
+                </a>
+            </div>
+            
+            <div class="folder-item">
+                <div class="folder-title">📁 我的文件夹</div>
+            </div>
+            
+            <div class="bookmark-item">
+                <a href="https://github.com" class="bookmark-link">
+                    <img src="https://github.com/favicon.ico" width="16" height="16" alt="">
+                    GitHub
+                </a>
+            </div>
+        </div>
+        
+        <div id="stats" class="stats">
+            3 个书签 | 1 个文件夹
+        </div>
+    </div>
+
+    <script>
+        let searchTerm = '';
+        
+        // 搜索过滤功能
+        function applySearchFilter() {
+            const debugInfo = document.getElementById('debug-info');
+            debugInfo.innerHTML = `搜索词: "${searchTerm}"<br>`;
+            
+            const allItems = document.querySelectorAll('.bookmark-item, .folder-item');
+            debugInfo.innerHTML += `找到项目数量: ${allItems.length}<br><br>`;
+            
+            if (!searchTerm) {
+                allItems.forEach(item => {
+                    item.classList.remove('hidden-by-search');
+                });
+                updateSearchStatus(allItems.length, allItems.length);
+                return;
+            }
+            
+            const searchLower = searchTerm.toLowerCase();
+            let matchCount = 0;
+            let totalCount = 0;
+            
+            allItems.forEach((item, index) => {
+                totalCount++;
+                const text = item.textContent.toLowerCase();
+                const isMatch = text.includes(searchLower);
+                
+                debugInfo.innerHTML += `项目 ${index + 1}: "${item.textContent.trim()}"<br>`;
+                debugInfo.innerHTML += `  - 小写文本: "${text}"<br>`;
+                debugInfo.innerHTML += `  - 搜索词: "${searchLower}"<br>`;
+                debugInfo.innerHTML += `  - 匹配: ${isMatch}<br><br>`;
+                
+                if (isMatch) {
+                    matchCount++;
+                    item.classList.remove('hidden-by-search');
+                } else {
+                    item.classList.add('hidden-by-search');
+                }
+            });
+            
+            debugInfo.innerHTML += `匹配项数量: ${matchCount}, 总数量: ${totalCount}`;
+            updateSearchStatus(matchCount, totalCount);
+        }
+        
+        // 更新搜索状态显示
+        function updateSearchStatus(matchCount, totalCount) {
+            const searchBox = document.getElementById('search-box');
+            const statsElement = document.getElementById('stats');
+            
+            if (searchTerm && searchBox) {
+                searchBox.classList.add('search-active');
+                if (matchCount === 0) {
+                    searchBox.classList.add('search-no-results');
+                } else {
+                    searchBox.classList.remove('search-no-results');
+                }
+                searchBox.title = `找到 ${matchCount} 个匹配项（共 ${totalCount} 项）`;
+            } else if (searchBox) {
+                searchBox.classList.remove('search-active', 'search-no-results');
+                searchBox.title = '';
+            }
+            
+            if (statsElement) {
+                if (searchTerm) {
+                    const resultColor = matchCount > 0 ? '#4a90e2' : '#ff6b6b';
+                    const resultIcon = matchCount > 0 ? '🔍' : '❌';
+                    statsElement.innerHTML = `3 个书签 | 1 个文件夹 | <span style="color: ${resultColor};">${resultIcon} 搜索结果: ${matchCount} 项</span>`;
+                } else {
+                    statsElement.innerHTML = '3 个书签 | 1 个文件夹';
+                }
+            }
+        }
+        
+        // 搜索框事件监听
+        document.getElementById('search-box').addEventListener('input', function(e) {
+            searchTerm = e.target.value.trim();
+            applySearchFilter();
+        });
+        
+        // 初始化
+        applySearchFilter();
+    </script>
+</body>
+</html>

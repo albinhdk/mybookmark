@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Bookmark Viewer",
+  "version": "2.0",
+  "description": "点击图标即可在一个弹出窗口中查看您的所有书签。",
+  "permissions": [
+    "bookmarks",
+    "tabs"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.svg",
+      "48": "icons/icon48.svg",
+      "128": "icons/icon128.svg"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.svg",
+    "48": "icons/icon48.svg",
+    "128": "icons/icon128.svg"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: https: http:;"
+  }
+}

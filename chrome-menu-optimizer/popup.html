@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Chrome书签优化器</title>
+  <meta charset="UTF-8">
+  <style>
+      :root {
+        --primary-color: #4a90e2;
+        --primary-hover: #357abd;
+        --secondary-color: #7f8c8d;
+        --background-color: #fdf6e3; /* 护眼米色 */
+        --surface-color: #fcfaf2;
+        --border-color: #dcdcdc;
+        --text-primary: #333333;
+        --text-secondary: #555555;
+        --shadow-light: 0 1px 2px rgba(0,0,0,0.05);
+        --shadow-medium: 0 2px 4px rgba(0,0,0,0.1);
+        --border-radius: 8px;
+        --transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        width: 720px; /* 更宽的界面以支持更多列 */
+        max-height: 600px;
+        overflow-y: auto;
+        font-family: 'Google Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background-color: var(--background-color);
+        color: var(--text-primary);
+        margin: 0;
+        padding: 0;
+      }
+
+      .container {
+        background: var(--background-color);
+        min-height: 100vh;
+        border-radius: var(--border-radius);
+        overflow: hidden;
+      }
+
+      .header {
+        background: var(--primary-color);
+        color: white;
+        padding: 20px;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        box-shadow: var(--shadow-medium);
+      }
+
+      .header h1 {
+        font-size: 24px;
+        font-weight: 500;
+        margin: 0 0 16px 0;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .header h1::before {
+        content: "📚";
+        font-size: 28px;
+      }
+
+      .search-container {
+        position: relative;
+      }
+
+      #search-box {
+        width: 100%;
+        padding: 12px 16px 12px 48px;
+        border: none;
+        border-radius: 24px;
+        font-size: 16px;
+        background: rgba(255,255,255,0.95);
+        backdrop-filter: blur(10px);
+        transition: var(--transition);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      }
+
+      #search-box:focus {
+        outline: none;
+        background: white;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        transform: translateY(-1px);
+      }
+
+      /* 搜索状态样式 */
+      .search-container input.search-active {
+        border-color: var(--primary-color) !important;
+        background: rgba(74, 144, 226, 0.05);
+      }
+
+      .search-container input.search-no-results {
+        border-color: #ff6b6b !important;
+        background: rgba(255, 107, 107, 0.05);
+      }
+
+      .search-icon {
+        position: absolute;
+        left: 16px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-secondary);
+        font-size: 18px;
+      }
+
+      .hidden-by-search {
+        display: none !important;
+      }
+
+      #breadcrumb {
+        padding: 16px 20px;
+        background: var(--surface-color);
+        border-bottom: 1px solid var(--border-color);
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      #breadcrumb a {
+        color: var(--primary-color);
+        text-decoration: none;
+        padding: 4px 8px;
+        border-radius: 4px;
+        transition: var(--transition);
+      }
+
+      #breadcrumb a:hover {
+        background: rgba(26, 115, 232, 0.1);
+      }
+
+      #breadcrumb span {
+        color: var(--text-secondary);
+      }
+
+      #bookmarks {
+        padding: 20px;
+        background: var(--background-color);
+      }
+
+      /* 网格布局 - 实现真正的平铺效果 */
+      .bookmark-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 12px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .folder-view .bookmark-grid {
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 10px;
+      }
+
+      /* 书签卡片样式 */
+      .bookmark-item {
+        background: var(--surface-color);
+        border-radius: var(--border-radius);
+        padding: 16px;
+        box-shadow: var(--shadow-light);
+        transition: var(--transition);
+        border: 1px solid var(--border-color);
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .bookmark-item:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-medium);
+        border-color: var(--primary-color);
+      }
+
+      .bookmark-item::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, var(--primary-color), #4285f4);
+        transform: scaleX(0);
+        transition: var(--transition);
+      }
+
+      .bookmark-item:hover::before {
+        transform: scaleX(1);
+      }
+
+      /* 书签链接样式 */
+      .bookmark-link {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        text-decoration: none;
+        color: var(--text-primary);
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 1.4;
+        width: 100%;
+      }
+
+      .bookmark-title {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .usage-count {
+        background: var(--primary-color);
+        color: white;
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 10px;
+        font-weight: 600;
+        min-width: 20px;
+        text-align: center;
+        flex-shrink: 0;
+      }
+
+      .favicon {
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+      }
+
+      .bookmark-link:hover {
+        color: var(--primary-color);
+      }
+
+      /* 文件夹样式 */
+      .folder-item {
+        background: var(--surface-color);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+      }
+
+      .folder-item:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-medium);
+        border-color: var(--primary-color);
+      }
+
+      .folder-item::before {
+        background: var(--primary-color);
+      }
+
+      .folder-title {
+        font-weight: 600;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        color: var(--text-primary);
+      }
+
+      .folder-title::before {
+        content: "📁";
+        font-size: 16px;
+      }
+
+      /* 嵌套列表样式 */
+      .nested-list {
+        margin-top: 12px;
+        padding-left: 0;
+        border-top: 1px solid var(--border-color);
+        padding-top: 12px;
+      }
+
+      .nested-item {
+        background: var(--background-color);
+        margin-bottom: 6px;
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+      }
+
+      .nested-item:hover {
+        background: var(--border-color);
+        transform: none;
+      }
+
+      /* "还有X个项目"链接样式 */
+      .more-items-link {
+        cursor: pointer !important;
+        color: var(--primary-color) !important;
+        font-weight: 500;
+        transition: var(--transition);
+        border: 1px dashed var(--primary-color);
+        background: rgba(74, 144, 226, 0.05) !important;
+      }
+
+      .more-items-link:hover {
+        background: rgba(74, 144, 226, 0.1) !important;
+        border-color: var(--primary-hover);
+        color: var(--primary-hover) !important;
+        transform: translateX(4px);
+      }
+
+      .more-items-link span {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .more-items-link span::before {
+        content: "📂";
+        font-size: 14px;
+      }
+
+      .more-items-link span::after {
+        content: "→";
+        font-size: 12px;
+        opacity: 0.7;
+        transition: var(--transition);
+      }
+
+      .more-items-link:hover span::after {
+        opacity: 1;
+        transform: translateX(2px);
+      }
+
+      /* 统计信息 */
+      .stats {
+        padding: 16px 20px;
+        background: var(--surface-color);
+        border-top: 1px solid var(--border-color);
+        font-size: 12px;
+        color: var(--text-secondary);
+        text-align: center;
+      }
+
+      /* 右键菜单美化 */
+      .context-menu {
+        display: none;
+        position: absolute;
+        z-index: 1000;
+        background: white;
+        border: 1px solid var(--border-color);
+        border-radius: var(--border-radius);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+        padding: 8px 0;
+        min-width: 180px;
+        font-size: 14px;
+        backdrop-filter: blur(20px);
+      }
+
+      .context-menu ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+
+      .context-menu li {
+        padding: 12px 16px;
+        cursor: pointer;
+        color: var(--text-primary);
+        background: transparent;
+        box-shadow: none;
+        margin: 0;
+        transition: var(--transition);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .context-menu li:hover {
+        background: var(--surface-color);
+        transform: none;
+      }
+
+      .context-menu li.separator {
+        height: 1px;
+        background: var(--border-color);
+        margin: 8px 0;
+        padding: 0;
+      }
+
+      .context-menu li.separator:hover {
+        background: var(--border-color);
+      }
+
+      /* 响应式设计 */
+      @media (max-width: 600px) {
+        body {
+          width: 100vw;
+        }
+        
+        .bookmark-grid {
+          grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        }
+      }
+
+      /* 滚动条美化 */
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: var(--surface-color);
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: var(--border-color);
+        border-radius: 4px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--text-secondary);
+      }
+
+      /* 加载动画 */
+      .loading {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 40px;
+        color: var(--text-secondary);
+      }
+
+      .loading::after {
+        content: '';
+        width: 20px;
+        height: 20px;
+        border: 2px solid var(--border-color);
+        border-top: 2px solid var(--primary-color);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-left: 12px;
+      }
+
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+
+      /* 错误处理和质量检查样式 */
+      .error-message {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 40px 20px;
+        text-align: center;
+        background: var(--surface-color);
+        border-radius: var(--border-radius);
+        border: 1px solid #e74c3c;
+        margin: 20px;
+      }
+
+      .error-icon {
+        font-size: 48px;
+        margin-bottom: 16px;
+        opacity: 0.7;
+      }
+
+      .error-text {
+        color: #e74c3c;
+        font-size: 16px;
+        margin-bottom: 16px;
+        line-height: 1.5;
+      }
+
+      .retry-btn {
+        background: var(--primary-color);
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: var(--transition);
+      }
+
+      .retry-btn:hover {
+        background: var(--primary-hover);
+        transform: translateY(-1px);
+      }
+
+      .loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 40px;
+        font-size: 16px;
+        color: var(--text-secondary);
+      }
+
+      .loading::before {
+        content: "⏳";
+        margin-right: 8px;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+
+      /* 性能监控指示器 */
+      .performance-indicator {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        background: rgba(0,0,0,0.8);
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        z-index: 1000;
+        display: none;
+      }
+
+      .performance-indicator.show {
+        display: block;
+      }
+
+      /* 调试模式样式 */
+      .debug-mode {
+        border: 2px dashed #f39c12 !important;
+      }
+
+      .debug-info {
+        position: absolute;
+        top: 0;
+        right: 0;
+        background: #f39c12;
+        color: white;
+        padding: 2px 6px;
+        font-size: 10px;
+        border-radius: 0 0 0 4px;
+      }
+
+      /* 质量检查结果样式 */
+      .quality-report {
+        position: fixed;
+        bottom: 10px;
+        left: 10px;
+        background: white;
+        border: 1px solid var(--border-color);
+        border-radius: var(--border-radius);
+        padding: 10px;
+        max-width: 300px;
+        box-shadow: var(--shadow-medium);
+        z-index: 1000;
+        display: none;
+      }
+
+      .quality-report.show {
+        display: block;
+      }
+
+      .quality-summary {
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+
+      .quality-issue {
+        font-size: 11px;
+        padding: 2px 0;
+        border-left: 3px solid;
+        padding-left: 6px;
+        margin: 2px 0;
+      }
+
+      .quality-issue.error {
+        border-color: #e74c3c;
+        color: #c0392b;
+      }
+
+      .quality-issue.warning {
+        border-color: #f39c12;
+        color: #d68910;
+      }
+
+      .quality-issue.info {
+        border-color: #3498db;
+        color: #2980b9;
+      }
+      .edit-dialog {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 2000;
+      }
+
+      .edit-dialog-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(4px);
+      }
+
+      .edit-dialog-content {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: var(--background-color);
+        border-radius: var(--border-radius);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        width: 90%;
+        max-width: 480px;
+        max-height: 90vh;
+        overflow: hidden;
+        animation: dialogSlideIn 0.3s ease-out;
+      }
+
+      @keyframes dialogSlideIn {
+        from {
+          opacity: 0;
+          transform: translate(-50%, -60%);
+        }
+        to {
+          opacity: 1;
+          transform: translate(-50%, -50%);
+        }
+      }
+
+      .edit-dialog-header {
+        padding: 20px 24px 16px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: var(--surface-color);
+      }
+
+      .edit-dialog-header h3 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .edit-dialog-close {
+        background: none;
+        border: none;
+        font-size: 24px;
+        cursor: pointer;
+        color: var(--text-secondary);
+        padding: 4px;
+        border-radius: 4px;
+        transition: var(--transition);
+        line-height: 1;
+      }
+
+      .edit-dialog-close:hover {
+        background: var(--border-color);
+        color: var(--text-primary);
+      }
+
+      .edit-dialog-body {
+        padding: 24px;
+      }
+
+      .form-group {
+        margin-bottom: 20px;
+      }
+
+      .form-group:last-child {
+        margin-bottom: 0;
+      }
+
+      .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 500;
+        color: var(--text-primary);
+        font-size: 14px;
+      }
+
+      .form-group input {
+        width: 100%;
+        padding: 12px 16px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        font-size: 14px;
+        background: var(--surface-color);
+        color: var(--text-primary);
+        transition: var(--transition);
+      }
+
+      .form-group input:focus {
+        outline: none;
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+      }
+
+      .edit-dialog-footer {
+        padding: 16px 24px 20px;
+        border-top: 1px solid var(--border-color);
+        display: flex;
+        justify-content: flex-end;
+        gap: 12px;
+        background: var(--surface-color);
+      }
+
+      .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: var(--transition);
+        min-width: 80px;
+      }
+
+      .btn-primary {
+        background: var(--primary-color);
+        color: white;
+      }
+
+      .btn-primary:hover {
+        background: var(--primary-hover);
+        transform: translateY(-1px);
+      }
+
+      .btn-secondary {
+        background: var(--surface-color);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+      }
+
+      .btn-secondary:hover {
+        background: var(--border-color);
+      }
+    </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>书签优化器</h1>
+      <div class="search-container">
+        <div class="search-icon">🔍</div>
+        <input type="search" id="search-box" placeholder="快速搜索书签...">
+      </div>
+    </div>
+    
+    <div id="breadcrumb"></div>
+    
+    <div id="bookmarks">
+      <div class="loading">正在加载书签</div>
+    </div>
+
+    <div class="stats" id="stats">
+      <span id="bookmark-count">0</span> 个书签 | <span id="folder-count">0</span> 个文件夹
+    </div>
+
+    <div id="context-menu" class="context-menu">
+      <ul>
+        <li data-action="open-in-background">🔗 后台打开</li>
+        <li data-action="copy-url">📋 复制链接</li>
+        <li data-action="copy-name">📝 复制名称</li>
+        <li class="separator"></li>
+        <li data-action="update-to-current-url">🔄 更新为当前地址</li>
+        <li data-action="clear-usage">🔄 清除使用记录</li>
+        <li class="separator"></li>
+        <li data-action="edit">✏️ 编辑</li>
+        <li data-action="delete">🗑️ 删除</li>
+      </ul>
+    </div>
+
+    <!-- 编辑对话框 -->
+    <div id="edit-dialog" class="edit-dialog">
+      <div class="edit-dialog-overlay"></div>
+      <div class="edit-dialog-content">
+        <div class="edit-dialog-header">
+          <h3>编辑书签</h3>
+          <button class="edit-dialog-close" id="edit-dialog-close">×</button>
+        </div>
+        <div class="edit-dialog-body">
+          <div class="form-group">
+            <label for="edit-title">名称</label>
+            <input type="text" id="edit-title" placeholder="请输入书签名称">
+          </div>
+          <div class="form-group" id="edit-url-group">
+            <label for="edit-url">网址</label>
+            <input type="url" id="edit-url" placeholder="请输入网址">
+          </div>
+        </div>
+        <div class="edit-dialog-footer">
+          <button class="btn btn-secondary" id="edit-cancel">取消</button>
+          <button class="btn btn-primary" id="edit-save">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 引入模块化脚本 -->
+  <script src="error-handler.js"></script>
+  <script src="config-manager.js"></script>
+  <script src="performance-monitor.js"></script>
+  <script src="code-quality-checker.js"></script>
+  <script src="usage-manager.js"></script>
+  <script src="pinyin-search.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

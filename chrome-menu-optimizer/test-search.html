@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>搜索功能测试</title>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .test-container {
+      border: 1px solid #ccc;
+      padding: 15px;
+      margin: 10px 0;
+      border-radius: 5px;
+    }
+    .hidden-by-search {
+      display: none !important;
+    }
+    #search-box {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 15px;
+      border: 1px solid #ddd;
+      border-radius: 3px;
+    }
+    ul {
+      list-style-type: none;
+      padding-left: 0;
+    }
+    li {
+      padding: 5px;
+      margin: 2px 0;
+      background: #f9f9f9;
+      border-radius: 3px;
+    }
+    .folder {
+      font-weight: bold;
+      color: #0066cc;
+      cursor: pointer;
+    }
+    a {
+      color: #0066cc;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>Chrome书签优化器 - 搜索功能测试</h1>
+  
+  <div class="test-container">
+    <h2>搜索测试</h2>
+    <input type="search" id="search-box" placeholder="搜索书签...">
+    
+    <div id="bookmarks">
+      <ul>
+        <li><a href="#">Google</a></li>
+        <li><a href="#">GitHub</a></li>
+        <li>
+          <span class="folder">开发工具</span>
+          <ul style="margin-left: 20px;">
+            <li><a href="#">Stack Overflow</a></li>
+            <li><a href="#">MDN Web Docs</a></li>
+            <li><a href="#">CodePen</a></li>
+          </ul>
+        </li>
+        <li>
+          <span class="folder">社交媒体</span>
+          <ul style="margin-left: 20px;">
+            <li><a href="#">Twitter</a></li>
+            <li><a href="#">LinkedIn</a></li>
+            <li><a href="#">Reddit</a></li>
+          </ul>
+        </li>
+        <li><a href="#">YouTube</a></li>
+        <li><a href="#">Wikipedia</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    const searchBox = document.getElementById('search-box');
+    const bookmarksContainer = document.getElementById('bookmarks');
+
+    function applySearchFilter() {
+      const searchTerm = searchBox.value.toLowerCase().trim();
+      const allItems = bookmarksContainer.querySelectorAll('li');
+      
+      console.log('Search term:', searchTerm, 'Items found:', allItems.length);
+
+      if (searchTerm === '') {
+        // If search is empty, show all items and their parent containers
+        allItems.forEach(item => {
+          item.classList.remove('hidden-by-search');
+          // Also show any nested lists
+          const nestedLists = item.querySelectorAll('ul');
+          nestedLists.forEach(list => {
+            list.style.display = '';
+          });
+        });
+        console.log('Search cleared, showing all items');
+        return;
+      }
+
+      // First, hide all items
+      allItems.forEach(item => {
+        item.classList.add('hidden-by-search');
+      });
+
+      let matchCount = 0;
+      // Then show items that match and their ancestors
+      allItems.forEach(item => {
+        const textElement = item.querySelector('a, .folder');
+        if (textElement) {
+          const text = textElement.textContent.toLowerCase();
+          if (text.includes(searchTerm)) {
+            matchCount++;
+            // Show this item
+            item.classList.remove('hidden-by-search');
+            
+            // Show all parent items up the tree
+            let parent = item.parentElement;
+            while (parent && parent !== bookmarksContainer) {
+              if (parent.tagName === 'LI') {
+                parent.classList.remove('hidden-by-search');
+                // If this parent has a nested list, make sure it's visible
+                const nestedList = parent.querySelector('ul');
+                if (nestedList) {
+                  nestedList.style.display = 'block';
+                }
+              }
+              parent = parent.parentElement;
+            }
+          }
+        }
+      });
+      
+      console.log('Search matches found:', matchCount);
+    }
+
+    searchBox.addEventListener('input', applySearchFilter);
+  </script>
+</body>
+</html>

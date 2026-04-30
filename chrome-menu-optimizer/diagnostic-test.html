@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Chrome书签优化器 - 测试页面</title>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: 'Google Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 20px;
+      background: #f5f5f5;
+    }
+    
+    .test-container {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    
+    .test-result {
+      padding: 10px;
+      border-radius: 4px;
+      margin: 10px 0;
+    }
+    
+    .success {
+      background: #e8f5e8;
+      color: #2e7d32;
+      border: 1px solid #4caf50;
+    }
+    
+    .error {
+      background: #ffebee;
+      color: #c62828;
+      border: 1px solid #f44336;
+    }
+    
+    .info {
+      background: #e3f2fd;
+      color: #1565c0;
+      border: 1px solid #2196f3;
+    }
+    
+    button {
+      background: #1a73e8;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    
+    button:hover {
+      background: #1557b0;
+    }
+    
+    .debug-info {
+      background: #f8f9fa;
+      border: 1px solid #e8eaed;
+      border-radius: 4px;
+      padding: 15px;
+      margin: 10px 0;
+      font-family: monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔧 Chrome书签优化器 - 诊断测试</h1>
+  
+  <div class="test-container">
+    <h2>环境检查</h2>
+    <div id="environment-check"></div>
+    <button onclick="checkEnvironment()">检查环境</button>
+  </div>
+  
+  <div class="test-container">
+    <h2>Chrome API测试</h2>
+    <div id="api-test"></div>
+    <button onclick="testChromeAPI()">测试Chrome API</button>
+  </div>
+  
+  <div class="test-container">
+    <h2>书签获取测试</h2>
+    <div id="bookmark-test"></div>
+    <button onclick="testBookmarkAccess()">测试书签访问</button>
+  </div>
+  
+  <div class="test-container">
+    <h2>调试信息</h2>
+    <div id="debug-info" class="debug-info">点击上方按钮开始测试...</div>
+  </div>
+
+  <script>
+    // 模拟Chrome API（用于测试环境）
+    if (typeof chrome === 'undefined') {
+      window.chrome = {
+        bookmarks: {
+          getTree: function(callback) {
+            setTimeout(() => {
+              callback([
+                {
+                  id: '0',
+                  title: '',
+                  children: [
+                    {
+                      id: '1',
+                      title: '书签栏',
+                      children: [
+                        {
+                          id: '2',
+                          title: '测试文件夹',
+                          children: [
+                            { id: '3', title: 'Google', url: 'https://www.google.com' },
+                            { id: '4', title: 'GitHub', url: 'https://github.com' }
+                          ]
+                        },
+                        { id: '5', title: 'Stack Overflow', url: 'https://stackoverflow.com' }
+                      ]
+                    }
+                  ]
+                }
+              ]);
+            }, 100);
+          },
+          getChildren: function(folderId, callback) {
+            const mockData = {
+              '1': [
+                {
+                  id: '2',
+                  title: '测试文件夹',
+                  children: [
+                    { id: '3', title: 'Google', url: 'https://www.google.com' },
+                    { id: '4', title: 'GitHub', url: 'https://github.com' }
+                  ]
+                },
+                { id: '5', title: 'Stack Overflow', url: 'https://stackoverflow.com' }
+              ],
+              '2': [
+                { id: '3', title: 'Google', url: 'https://www.google.com' },
+                { id: '4', title: 'GitHub', url: 'https://github.com' }
+              ]
+            };
+            
+            setTimeout(() => {
+              callback(mockData[folderId] || []);
+            }, 50);
+          },
+          get: function(nodeId, callback) {
+            const mockNodes = {
+              '1': [{ id: '1', title: '书签栏', parentId: '0' }],
+              '2': [{ id: '2', title: '测试文件夹', parentId: '1' }]
+            };
+            
+            setTimeout(() => {
+              callback(mockNodes[nodeId] || []);
+            }, 50);
+          }
+        },
+        runtime: {
+          lastError: null
+        }
+      };
+    }
+
+    function log(message, type = 'info') {
+      const debugDiv = document.getElementById('debug-info');
+      const timestamp = new Date().toLocaleTimeString();
+      debugDiv.textContent += `[${timestamp}] ${type.toUpperCase()}: ${message}\n`;
+      debugDiv.scrollTop = debugDiv.scrollHeight;
+    }
+
+    function showResult(containerId, message, type) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = `<div class="test-result ${type}">${message}</div>`;
+    }
+
+    function checkEnvironment() {
+      log('开始环境检查');
+      
+      const checks = [
+        { name: 'Chrome对象', test: () => typeof chrome !== 'undefined' },
+        { name: 'Chrome书签API', test: () => chrome && chrome.bookmarks },
+        { name: 'DOM元素', test: () => document.getElementById('debug-info') !== null },
+        { name: 'Promise支持', test: () => typeof Promise !== 'undefined' },
+        { name: 'async/await支持', test: () => {
+          try {
+            eval('(async () => {})');
+            return true;
+          } catch {
+            return false;
+          }
+        }}
+      ];
+      
+      let results = '';
+      let allPassed = true;
+      
+      checks.forEach(check => {
+        const passed = check.test();
+        allPassed = allPassed && passed;
+        results += `${passed ? '✅' : '❌'} ${check.name}\n`;
+        log(`${check.name}: ${passed ? '通过' : '失败'}`);
+      });
+      
+      showResult('environment-check', `<pre>${results}</pre>`, allPassed ? 'success' : 'error');
+    }
+
+    async function testChromeAPI() {
+      log('开始Chrome API测试');
+      
+      try {
+        // 测试权限检查
+        const hasPermission = await new Promise((resolve) => {
+          chrome.bookmarks.getTree(function(bookmarkTree) {
+            if (chrome.runtime.lastError) {
+              log(`权限检查失败: ${chrome.runtime.lastError.message}`, 'error');
+              resolve(false);
+            } else {
+              log('权限检查通过', 'success');
+              resolve(true);
+            }
+          });
+        });
+        
+        if (hasPermission) {
+          showResult('api-test', '✅ Chrome API可用，权限正常', 'success');
+        } else {
+          showResult('api-test', '❌ Chrome API权限不足', 'error');
+        }
+        
+      } catch (error) {
+        log(`API测试异常: ${error.message}`, 'error');
+        showResult('api-test', `❌ API测试失败: ${error.message}`, 'error');
+      }
+    }
+
+    async function testBookmarkAccess() {
+      log('开始书签访问测试');
+      
+      try {
+        // 测试获取书签栏内容
+        const bookmarks = await new Promise((resolve, reject) => {
+          chrome.bookmarks.getChildren('1', function(bookmarks) {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve(bookmarks || []);
+            }
+          });
+        });
+        
+        log(`成功获取书签，数量: ${bookmarks.length}`);
+        
+        // 测试文件夹点击
+        const folders = bookmarks.filter(b => b.children);
+        if (folders.length > 0) {
+          const folder = folders[0];
+          log(`测试打开文件夹: ${folder.title} (ID: ${folder.id})`);
+          
+          const folderContents = await new Promise((resolve, reject) => {
+            chrome.bookmarks.getChildren(folder.id, function(contents) {
+              if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+              } else {
+                resolve(contents || []);
+              }
+            });
+          });
+          
+          log(`文件夹内容数量: ${folderContents.length}`);
+          showResult('bookmark-test', `✅ 书签访问正常\n📁 找到 ${bookmarks.length} 个项目\n📂 文件夹 "${folder.title}" 包含 ${folderContents.length} 个项目`, 'success');
+        } else {
+          showResult('bookmark-test', `✅ 书签访问正常\n📁 找到 ${bookmarks.length} 个项目（无文件夹）`, 'success');
+        }
+        
+      } catch (error) {
+        log(`书签访问失败: ${error.message}`, 'error');
+        showResult('bookmark-test', `❌ 书签访问失败: ${error.message}`, 'error');
+      }
+    }
+
+    // 自动运行初始检查
+    window.addEventListener('load', () => {
+      log('页面加载完成，开始自动检查');
+      checkEnvironment();
+    });
+  </script>
+</body>
+</html>
