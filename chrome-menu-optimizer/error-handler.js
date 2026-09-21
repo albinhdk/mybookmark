@@ -93,16 +93,23 @@ class ErrorHandler {
     const container = document.getElementById(containerId);
     if (!container) return;
 
-    const retryButton = showRetry ? 
-      `<button onclick="location.reload()" class="retry-btn">重试</button>` : '';
-
     container.innerHTML = `
       <div class="error-message">
         <div class="error-icon">⚠️</div>
         <div class="error-text">${message}</div>
-        ${retryButton}
       </div>
     `;
+
+    if (showRetry) {
+      const retryButton = document.createElement('button');
+      retryButton.className = 'retry-btn';
+      retryButton.textContent = '重试';
+      retryButton.addEventListener('click', () => location.reload());
+      const messageBox = container.querySelector('.error-message');
+      if (messageBox) {
+        messageBox.appendChild(retryButton);
+      }
+    }
   }
 
   /**

@@ -187,9 +187,13 @@ async function initializeExtension() {
         <div class="error">
           ❌ 初始化失败<br>
           <small>${error.message}</small><br>
-          <button onclick="initializeExtension()" style="margin-top: 10px;">重试</button>
+          <button class="retry-btn">重试</button>
         </div>
       `;
+      const retryBtn = bookmarksContainer.querySelector('button.retry-btn');
+      if (retryBtn) {
+        retryBtn.addEventListener('click', () => initializeExtension());
+      }
     }
   }
 }
@@ -447,9 +451,13 @@ async function renderBookmarks(folderId) {
       <div class="error">
         ❌ 加载书签失败<br>
         <small>${errorMessage}</small><br>
-        <button onclick="renderBookmarks('${folderId}')" style="margin-top: 10px;">重试</button>
+        <button class="retry-btn">重试</button>
       </div>
     `;
+    const retryBtn = bookmarksContainer.querySelector('button.retry-btn');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', () => renderBookmarks(folderId));
+    }
   }
 }
 
