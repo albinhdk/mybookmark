@@ -36,7 +36,6 @@
 
       .container {
         background: var(--background-color);
-        min-height: 100vh;
         border-radius: var(--border-radius);
         overflow: hidden;
       }
@@ -387,17 +386,6 @@
 
       .context-menu li.separator:hover {
         background: var(--border-color);
-      }
-
-      /* 响应式设计 */
-      @media (max-width: 600px) {
-        body {
-          width: 100vw;
-        }
-        
-        .bookmark-grid {
-          grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-        }
       }
 
       /* 滚动条美化 */
