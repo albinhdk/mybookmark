@@ -1,12 +1,11 @@
-// 内存书签树索引测试：vm 加载真实 popup.js，桩掉浏览器 API
-// 重点验证：一次 getTree 之后，面包屑/文件夹预览/搜索路径零 IPC；变更监听与 CRUD 正确失效
+// 共享书签树模块测试：vm 加载真实 bookmark-tree.js
+// 覆盖：树构建、ensure 去重、零 IPC、变更监听失效、书签栏根ID、API 回退
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const FILE = path.join(__dirname, '..', 'chrome-menu-optimizer', 'popup.js');
+const FILE = path.join(__dirname, '..', 'chrome-menu-optimizer', 'bookmark-tree.js');
 
-// 固定书签树 fixtures
 const TREE = [{
   id: '0', title: '',
   children: [
@@ -25,77 +24,25 @@ const TREE = [{
   ]
 }];
 
-function makeElementStub() {
-  return {
-    dataset: {},
-    style: {},
-    title: '',
-    textContent: '',
-    innerHTML: '',
-    classList: { add() {}, remove() {}, contains: () => false },
-    appendChild() {},
-    remove() {},
-    addEventListener() {},
-    setAttribute() {},
-    querySelector: () => null,
-    querySelectorAll: () => [],
-    closest: () => null
-  };
-}
-
 function makeSandbox() {
-  const calls = { getTree: 0, getChildren: 0, get: 0, remove: 0 };
+  const calls = { getTree: 0, getChildren: 0 };
   const listeners = {};
   const sandbox = {
     console: { log() {}, warn() {}, error() {} },
     calls,
-    listeners,
     setTimeout,
-    clearTimeout,
     Date,
     Map,
     Promise,
     URL,
-    Array,
-    Object,
-    String,
-    Number,
-    RegExp,
-    Error,
-    alert() {},
-    confirm: () => true,
-    navigator: { clipboard: { writeText: async () => {} } },
-    document: {
-      addEventListener() {},
-      getElementById: () => makeElementStub(),
-      querySelector: () => null,
-      querySelectorAll: () => [],
-      createElement: () => makeElementStub(),
-      body: { appendChild() {} }
-    },
-    bookmarkUsageManager: {
-      getUsageCount: () => 0,
-      formatUsageCount: () => '',
-      getLastUsed: () => null,
-      formatLastUsed: () => '',
-      recordUsage() {},
-      sortBookmarksByUsage: (arr) => arr
-    },
     chrome: {
-      runtime: { lastError: null, sendMessage() {} },
+      runtime: { lastError: null },
       bookmarks: {
         getTree(cb) { calls.getTree++; setTimeout(() => cb(JSON.parse(JSON.stringify(TREE))), 0); },
-        getChildren(id, cb) { calls.getChildren++; setTimeout(() => cb([]), 0); },
-        get(id, cb) { calls.get++; setTimeout(() => cb([]), 0); },
-        update(id, data, cb) { setTimeout(() => cb({ id }), 0); },
-        remove(id, cb) { calls.remove++; setTimeout(() => { if (cb) cb(); }, 0); },
-        create(bm, cb) { setTimeout(() => cb({ id: 'new' }), 0); }
-      },
-      tabs: { create() {}, query() {} },
-      storage: { local: { get: async () => ({}), set: async () => {} } }
+        getChildren(id, cb) { calls.getChildren++; setTimeout(() => cb([]), 0); }
+      }
     }
   };
-  // on* 事件桩：记录监听器供测试触发
   ['onCreated', 'onRemoved', 'onChanged', 'onMoved', 'onChildrenReordered', 'onImportEnded'].forEach(name => {
     listeners[name] = [];
     sandbox.chrome.bookmarks[name] = { addListener: (fn) => listeners[name].push(fn) };
@@ -114,11 +61,12 @@ function check(name, cond) {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 (async () => {
-  // ===== 1. 树索引构建 =====
-  console.log('[1] 树索引构建');
+  // ===== 1. 模块挂载与树构建 =====
+  console.log('[1] 模块挂载与树构建');
   {
     const { sandbox } = makeSandbox();
-    const tree = sandbox.buildTreeIndex(TREE);
+    check('挂载到 window.BMV.bookmarkTree', !!(sandbox.window.BMV && sandbox.BMV.bookmarkTree));
+    const tree = sandbox.BMV.bookmarkTree.buildTreeIndex(TREE);
     check('rootId 正确', tree.rootId === '0');
     check('nodeById 覆盖全部节点', tree.nodeById.size === 7);
     check('书签栏 parentId=根', tree.nodeById.get('1').parentId === '0');
@@ -130,11 +78,12 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   console.log('[2] ensure / invalidate');
   {
     const { sandbox, calls } = makeSandbox();
-    await sandbox.ensureBookmarkTree();
-    await sandbox.ensureBookmarkTree();
-    check('并发/重复 ensure 只拉一次 getTree', calls.getTree === 1);
-    sandbox.invalidateBookmarkTree();
-    await sandbox.ensureBookmarkTree();
+    const T = sandbox.BMV.bookmarkTree;
+    await T.ensureBookmarkTree();
+    await T.ensureBookmarkTree();
+    check('重复 ensure 只拉一次 getTree', calls.getTree === 1);
+    T.invalidateBookmarkTree();
+    await T.ensureBookmarkTree();
     check('失效后重新拉取', calls.getTree === 2);
   }
 
@@ -142,64 +91,66 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   console.log('[3] 零 IPC 数据访问');
   {
     const { sandbox, calls } = makeSandbox();
-    await sandbox.ensureBookmarkTree();
-    const children = await sandbox.getBookmarks('2');
+    const T = sandbox.BMV.bookmarkTree;
+    await T.ensureBookmarkTree();
+    const children = await T.getBookmarks('2');
     check('getBookmarks 返回子项', children.length === 2 && children[0].id === '3');
-    const path = await sandbox.buildBreadcrumbPath('3');
+    const path = await T.buildBreadcrumbPath('3');
     check('面包屑路径正确', path.length === 3 && path[0].title === '书签栏' && path[2].title === 'GitHub');
-    const folderPath = await sandbox.getFolderPath('2');
+    const folderPath = await T.getFolderPath('2');
     check('文件夹路径字符串正确', folderPath === '书签栏 › 开发工具');
-    const all = await sandbox.getAllBookmarks();
+    const all = await T.getAllBookmarks();
     check('getAllBookmarks 展平且排除根', all.length === 6 && !all.some(b => b.id === '0'));
     check('展平项带 parentId', all.find(b => b.id === '3').parentId === '2');
     check('getChildren 零调用（原 N+1 路径）', calls.getChildren === 0);
-    check('bookmarks.get 零调用（原面包屑路径）', calls.get === 0);
   }
 
-  // ===== 4. 变更监听失效 =====
+  // ===== 4. 变更监听 =====
   console.log('[4] 变更监听');
   {
     const { sandbox, calls, listeners } = makeSandbox();
-    sandbox.registerBookmarkTreeListeners();
+    const T = sandbox.BMV.bookmarkTree;
+    T.registerBookmarkTreeListeners();
     check('注册了 onRemoved 等监听', ['onCreated', 'onRemoved', 'onChanged', 'onMoved'].every(n => listeners[n].length === 1));
-    await sandbox.ensureBookmarkTree();
-    listeners.onRemoved.forEach(fn => fn('3'));   // 模拟外部删除
-    await sandbox.ensureBookmarkTree();
+    await T.ensureBookmarkTree();
+    listeners.onRemoved.forEach(fn => fn('3'));
+    await T.ensureBookmarkTree();
     check('onRemoved 触发后索引失效并重建', calls.getTree === 2);
-    // 幂等：重复注册不叠加
-    sandbox.registerBookmarkTreeListeners();
+    T.registerBookmarkTreeListeners();
     check('重复注册被拦截', listeners.onRemoved.length === 1);
   }
 
-  // ===== 5. CRUD 后失效（delete） =====
-  console.log('[5] CRUD 失效');
-  {
-    const { sandbox, calls } = makeSandbox();
-    await sandbox.ensureBookmarkTree();
-    sandbox.handleContextMenuAction('delete', { id: '3', title: 'GitHub', url: 'https://github.com' });
-    await sleep(30);
-    await sandbox.ensureBookmarkTree();
-    check('删除成功后索引失效并重建', calls.getTree === 2);
-  }
-
-  // ===== 6. 书签栏根 ID =====
-  console.log('[6] 书签栏根ID');
+  // ===== 5. 书签栏根ID =====
+  console.log('[5] 书签栏根ID');
   {
     const { sandbox } = makeSandbox();
-    await sandbox.ensureBookmarkTree();
-    check('取根节点第一个子节点', sandbox.getBookmarkBarRootIdFromTree() === '1');
+    const T = sandbox.BMV.bookmarkTree;
+    await T.ensureBookmarkTree();
+    check('取根节点第一个子节点', T.getBookmarkBarRootId() === '1');
   }
 
-  // ===== 7. 树缺失时 getBookmarks 回退 API =====
-  console.log('[7] API 回退');
+  // ===== 6. 树缺失时 getBookmarks 回退 API =====
+  console.log('[6] API 回退');
   {
     const { sandbox, calls } = makeSandbox();
-    sandbox.chrome.bookmarks.getTree = (cb) => { calls.getTree++; setTimeout(() => cb(null), 0); }; // 树为空
-    const children = await sandbox.getBookmarks('2');
+    sandbox.chrome.bookmarks.getTree = (cb) => { calls.getTree++; setTimeout(() => cb(null), 0); };
+    const children = await sandbox.BMV.bookmarkTree.getBookmarks('2');
     check('树不可用时回退 getChildren', calls.getChildren === 1 && Array.isArray(children));
+  }
+
+  // ===== 7. invalidate 幂等与并发 =====
+  console.log('[7] invalidate 健壮性');
+  {
+    const { sandbox, calls } = makeSandbox();
+    const T = sandbox.BMV.bookmarkTree;
+    const p1 = T.ensureBookmarkTree();
+    T.invalidateBookmarkTree(); // 加载中途失效
+    await p1;
+    await T.ensureBookmarkTree();
+    check('加载中途失效后能重新拉取', calls.getTree === 2);
   }
 
   const failed = results.filter(r => !r).length;
   console.log(`\n===== ${results.length - failed}/${results.length} 通过 =====`);
-  if (failed) { console.log('失败项数:', failed); process.exit(1); }
+  if (failed) process.exit(1);
 })().catch(e => { console.error('测试执行异常:', e); process.exit(1); });

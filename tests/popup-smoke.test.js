@@ -47,7 +47,10 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   });
   await new Promise((r, reject) => { ws.addEventListener('open', r); setTimeout(() => reject(new Error('ws 超时')), 5000); });
   await send('Runtime.enable');
-  await sleep(1200); // 等页面初始化
+  await send('Page.enable');
+  // 重新加载页面，保证测试从初始状态开始（可重复运行）
+  await send('Page.navigate', { url: page.url });
+  await sleep(1500);
 
   const evalJs = async (expr) => {
     const r = await send('Runtime.evaluate', { expression: `(async () => { ${expr} })()`, returnByValue: true, awaitPromise: true });
@@ -106,7 +109,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
       Array.from({ length: 300 }, (_, i) => ({ id: 'b' + i, title: '书签' + i, url: 'https://example.com/' + i }))
     }] }];
     chrome.bookmarks.getTree = (cb) => cb(big);
-    invalidateBookmarkTree();
+    BMV.bookmarkTree.invalidateBookmarkTree();
     return true;
   `);
   await evalJs(`await renderBookmarks('1'); return true;`);
@@ -121,7 +124,65 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const moreText = await evalJs(`return document.querySelector('.load-more-item')?.textContent || '';`);
   check('加载更多提示剩余数量', moreText.includes('还有 100 个'), moreText);
 
-  console.log('[G] 无控制台错误');
+  console.log('[G] 键盘导航');
+  await evalJs(`
+    const box = document.getElementById('search-box');
+    box.value = '';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  await sleep(500); // 等恢复文件夹视图
+  await evalJs(`
+    document.getElementById('search-box').focus();
+    document.getElementById('search-box').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    return true;
+  `);
+  const kbFocus = await evalJs(`return { has: !!document.querySelector('.keyboard-focus'), tag: document.querySelector('.keyboard-focus')?.className || '' };`);
+  check('↓ 键在书签项间移动焦点', kbFocus.has === true, kbFocus.tag);
+  await evalJs(`
+    const box = document.getElementById('search-box');
+    box.value = 'git';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  await sleep(500);
+  await evalJs(`
+    document.getElementById('search-box').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return true;
+  `);
+  await sleep(500);
+  const afterEsc = await evalJs(`return { value: document.getElementById('search-box').value, items: document.querySelectorAll('.bookmark-item').length, results: document.querySelectorAll('.search-result-item').length };`);
+  // 步骤 C 已进入"开发工具"文件夹（3 项），Esc 后应恢复到该文件夹视图
+  check('Esc 清空搜索并恢复视图', afterEsc.value === '' && afterEsc.results === 0 && afterEsc.items === 3, JSON.stringify(afterEsc));
+
+  console.log('[H] 右键菜单定位（fixed + 视口坐标）');
+  await evalJs(`
+    const li = document.querySelector('.bookmark-item');
+    const r = li.getBoundingClientRect();
+    li.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+    const menu = document.getElementById('context-menu');
+    const mr = menu.getBoundingClientRect();
+    return { pos: getComputedStyle(menu).position, inView: mr.left >= 0 && mr.top >= 0 && mr.right <= window.innerWidth && mr.bottom <= window.innerHeight };
+  `);
+  const menuPos = await evalJs(`return { pos: getComputedStyle(document.getElementById('context-menu')).position };`);
+  check('菜单为 fixed 定位', menuPos.pos === 'fixed', menuPos.pos);
+
+  console.log('[J] 检查器独立页（checker.html，不再受 popup 生命周期影响）');
+  await send('Page.navigate', { url: 'file:///D:/workspace/mybookmark/chrome-menu-optimizer/checker.html' });
+  await sleep(1000);
+  // 轮询等待检查完成（结果表格出现）；网络可达与否都会产生结果行
+  let rows = 0;
+  for (let i = 0; i < 40; i++) {
+    rows = await evalJs(`return document.querySelectorAll('.checker-table tbody tr').length;`) || 0;
+    if (rows > 0) break;
+    await sleep(500);
+  }
+  check('检查器自动启动并渲染结果表格', rows === 7, rows);
+  const checkerSummary = await evalJs(`return { dialog: !!document.getElementById('checker-dialog'), summary: (document.querySelector('.checker-summary')?.textContent || '').trim(), recheck: !!document.getElementById('checker-recheck-btn'), restore: !!document.getElementById('checker-restore-btn') };`);
+  check('结果对话框含统计/重新检查/恢复备份', checkerSummary.dialog === true && checkerSummary.recheck === true && checkerSummary.restore === true, JSON.stringify(checkerSummary));
+  check('统计行包含有效计数', /有效/.test(checkerSummary.summary), checkerSummary.summary);
+
+  console.log('[K] 无控制台错误');
   check('加载与交互全程无 JS 错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 
   ws.close();
