@@ -112,6 +112,7 @@ const BookmarkChecker = {
     this.results.clear();
   },
 
+  // 在 popup 头部渲染"检查书签"按钮（点击后打开独立的检查器页，长任务不受 popup 生命周期影响）
   renderCheckAllButton() {
     const header = document.querySelector('.header h1');
     if (!header || document.getElementById('btn-check-all')) return;
@@ -119,11 +120,19 @@ const BookmarkChecker = {
     btn.id = 'btn-check-all';
     btn.className = 'check-all-btn';
     btn.textContent = '检查书签';
-    btn.addEventListener('click', () => {
-      if (this.isRunning) { this.cancel(); return; }
-      this.checkAllBookmarks();
-    });
+    btn.addEventListener('click', () => this.openCheckerPage());
     header.appendChild(btn);
+  },
+
+  // 打开检查器独立页（支持 ?bookmark=ID 单个检查 / ?folder=ID 文件夹检查 / 默认全量）
+  openCheckerPage(params) {
+    const query = params ? '?' + new URLSearchParams(params).toString() : '';
+    const url = chrome.runtime.getURL('checker.html') + query;
+    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
+      chrome.tabs.create({ url });
+    } else {
+      window.open(url, '_blank');
+    }
   },
 
   async _runCheck(bookmarks, emptyMessage) {
@@ -146,7 +155,7 @@ const BookmarkChecker = {
   },
 
   async checkAllBookmarks() {
-    const allBookmarks = await getAllBookmarks();
+    const allBookmarks = await BMV.bookmarkTree.getAllBookmarks();
     await this._runCheck(allBookmarks.filter(b => b.url), '没有可检查的书签');
   },
 
@@ -371,7 +380,6 @@ const BookmarkChecker = {
           }
         }
         alert(`已删除 ${deleted} 个书签。删除前已自动备份，可点击"恢复备份"撤销。`);
-        if (typeof renderBookmarks === 'function') renderBookmarks(currentFolderId);
         this.showResultsDialog();
       });
     }
@@ -441,7 +449,6 @@ const BookmarkChecker = {
       }
     }
     alert(`已恢复 ${restored} / ${backup.items.length} 个书签`);
-    if (typeof renderBookmarks === 'function') renderBookmarks(currentFolderId);
     this.showResultsDialog();
   },
 
@@ -499,3 +506,45 @@ const BookmarkChecker = {
 if (typeof window !== 'undefined') {
   window.bookmarkChecker = BookmarkChecker;
 }
+
+// ===== 独立检查器页（checker.html）引导 =====
+// 根据 URL 参数决定检查范围：?bookmark=ID 单个 / ?folder=ID 文件夹 / 默认全量。
+// 独立页运行使长任务不再受 popup 关闭影响。
+(function initCheckerPage() {
+  if (typeof document === 'undefined' || !document.body) return;
+  if (!/checker\.html/.test(location.pathname)) return;
+
+  const params = new URLSearchParams(location.search);
+  const bookmarkId = params.get('bookmark');
+  const folderId = params.get('folder');
+
+  async function start() {
+    try {
+      if (bookmarkId) {
+        const bookmark = await new Promise((resolve) => {
+          chrome.bookmarks.get(bookmarkId, (nodes) => resolve(nodes && nodes[0]));
+        });
+        if (bookmark) {
+          const result = await BookmarkChecker.checkSingle(bookmark);
+          BookmarkChecker.results.set(bookmark.id, { ...result, title: bookmark.title, url: bookmark.url, parentId: bookmark.parentId });
+          BookmarkChecker.showResultsDialog();
+          return;
+        }
+      }
+      if (folderId) {
+        await BookmarkChecker.checkFolderBookmarks(folderId, '');
+        return;
+      }
+      await BookmarkChecker.checkAllBookmarks();
+    } catch (error) {
+      console.error('检查器启动失败:', error);
+      alert('检查器启动失败: ' + error.message);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();

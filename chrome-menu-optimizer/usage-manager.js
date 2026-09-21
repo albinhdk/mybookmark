@@ -3,7 +3,9 @@ class BookmarkUsageManager {
   constructor() {
     this.storageKey = 'bookmark_usage_stats';
     this.usageStats = {};
-    this.loadUsageStats();
+    this.maxEntries = 5000;   // 条目上限，超出按最后使用时间淘汰
+    this.saveTimer = null;
+    this.ready = this.loadUsageStats(); // 首屏渲染前 await 它，避免统计先显示 0
   }
 
   // 从本地存储加载使用统计
@@ -17,15 +19,22 @@ class BookmarkUsageManager {
         const stored = localStorage.getItem(this.storageKey);
         this.usageStats = stored ? JSON.parse(stored) : {};
       }
-      console.log('加载使用统计:', this.usageStats);
     } catch (error) {
       console.error('加载使用统计失败:', error);
       this.usageStats = {};
     }
   }
 
-  // 保存使用统计到本地存储
-  async saveUsageStats() {
+  // 保存使用统计到本地存储（500ms 防抖合并写，避免每次点击都全量写盘）
+  saveUsageStats() {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => { this.saveTimer = null; this._writeNow(); }, 500);
+  }
+
+  // 立即写入（明确操作/页面关闭前使用）
+  async _writeNow() {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
     try {
       if (chrome && chrome.storage && chrome.storage.local) {
         await chrome.storage.local.set({ [this.storageKey]: this.usageStats });
@@ -33,7 +42,6 @@ class BookmarkUsageManager {
         // 测试环境使用localStorage
         localStorage.setItem(this.storageKey, JSON.stringify(this.usageStats));
       }
-      console.log('保存使用统计:', this.usageStats);
     } catch (error) {
       console.error('保存使用统计失败:', error);
     }
@@ -60,8 +68,26 @@ class BookmarkUsageManager {
     this.usageStats[bookmarkId].title = bookmarkTitle; // 更新标题以防变化
     this.usageStats[bookmarkId].url = bookmarkUrl; // 更新URL以防变化
 
-    await this.saveUsageStats();
-    console.log(`记录书签使用: ${bookmarkTitle} (${this.usageStats[bookmarkId].count}次)`);
+    this.saveUsageStats(); // 防抖合并写
+  }
+
+  // 清理已删除书签的孤儿统计条目，并按上限淘汰最久未使用的条目
+  pruneUsageStats(validIds) {
+    let changed = false;
+    Object.keys(this.usageStats).forEach(id => {
+      if (!validIds.has(id)) {
+        delete this.usageStats[id];
+        changed = true;
+      }
+    });
+    const entries = Object.entries(this.usageStats);
+    if (entries.length > this.maxEntries) {
+      entries.sort((a, b) => (b[1].lastUsed || 0) - (a[1].lastUsed || 0));
+      this.usageStats = Object.fromEntries(entries.slice(0, this.maxEntries));
+      changed = true;
+    }
+    if (changed) this.saveUsageStats();
+    return changed;
   }
 
   // 获取书签使用次数
@@ -78,8 +104,7 @@ class BookmarkUsageManager {
   async clearUsage(bookmarkId) {
     if (this.usageStats[bookmarkId]) {
       delete this.usageStats[bookmarkId];
-      await this.saveUsageStats();
-      console.log(`清除书签使用记录: ${bookmarkId}`);
+      await this._writeNow(); // 明确操作，立即落盘
       return true;
     }
     return false;
@@ -88,8 +113,7 @@ class BookmarkUsageManager {
   // 清除所有使用记录
   async clearAllUsage() {
     this.usageStats = {};
-    await this.saveUsageStats();
-    console.log('清除所有使用记录');
+    await this._writeNow();
   }
 
   // 根据使用频率排序书签
@@ -159,4 +183,8 @@ class BookmarkUsageManager {
 }
 
 // 创建全局使用统计管理器实例
+// 同时挂到 window，统一访问方式（与 window.BMV / window.bookmarkChecker 一致）
 const bookmarkUsageManager = new BookmarkUsageManager();
+if (typeof window !== 'undefined') {
+  window.bookmarkUsageManager = bookmarkUsageManager;
+}

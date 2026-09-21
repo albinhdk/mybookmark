@@ -11,199 +11,33 @@ const RENDER_BATCH = 100;
 let currentRenderData = new Map(); // id -> bookmark，供事件委托查找
 let pendingLoadMore = null;        // 当前"加载更多"按钮对应的回调
 
-// ===== 内存书签树索引 =====
-// 一次 getTree 全量拉取并建索引，面包屑 / 文件夹预览 / 搜索路径全部改为内存查询（零 IPC）；
-// 通过 chrome.bookmarks 变更监听 + CRUD 后主动失效保持新鲜（替代原 5 分钟 TTL 缓存）。
-let bookmarkTreeIndex = null;   // { nodeById: Map<id, node>, rootId }
-let treeListenersRegistered = false;
-let treeLoadPromise = null;     // 首次加载并发去重
-
-function buildTreeIndex(bookmarkTree) {
-  const nodeById = new Map();
-  const root = bookmarkTree && bookmarkTree[0];
-  if (!root) return { nodeById, rootId: '0' };
-  nodeById.set(root.id, { ...root, parentId: null });
-  const walk = (nodes, parentId) => {
-    (nodes || []).forEach(node => {
-      nodeById.set(node.id, { ...node, parentId });
-      if (node.children && node.children.length > 0) walk(node.children, node.id);
-    });
-  };
-  walk(root.children, root.id);
-  return { nodeById, rootId: root.id };
-}
-
-// 确保树索引可用（并发安全：首次加载共享同一个 Promise）
-function ensureBookmarkTree() {
-  if (bookmarkTreeIndex) return Promise.resolve(bookmarkTreeIndex);
-  if (treeLoadPromise) return treeLoadPromise;
-  treeLoadPromise = new Promise((resolve, reject) => {
-    chrome.bookmarks.getTree(function(bookmarkTree) {
-      if (chrome.runtime.lastError) {
-        treeLoadPromise = null;
-        reject(new Error(`获取书签树失败: ${chrome.runtime.lastError.message}`));
-        return;
-      }
-      try {
-        bookmarkTreeIndex = buildTreeIndex(bookmarkTree);
-        resolve(bookmarkTreeIndex);
-      } catch (error) {
-        treeLoadPromise = null;
-        reject(error);
-      }
-    });
-  });
-  return treeLoadPromise;
-}
-
-// 失效树索引（CRUD 成功后调用，下次 ensure 时自动重建）
-function invalidateBookmarkTree() {
-  bookmarkTreeIndex = null;
-  treeLoadPromise = null;
-}
-
-// 注册书签变更监听：外部变更（其他设备同步、书签管理器、导入）同样失效索引
-function registerBookmarkTreeListeners() {
-  if (treeListenersRegistered) return;
-  treeListenersRegistered = true;
-  const events = ['onCreated', 'onRemoved', 'onChanged', 'onMoved', 'onChildrenReordered'];
-  events.forEach(name => {
-    const api = chrome.bookmarks && chrome.bookmarks[name];
-    if (api && typeof api.addListener === 'function') {
-      api.addListener(() => invalidateBookmarkTree());
-    }
-  });
-  const importEnded = chrome.bookmarks && chrome.bookmarks.onImportEnded;
-  if (importEnded && typeof importEnded.addListener === 'function') {
-    importEnded.addListener(() => invalidateBookmarkTree());
+// favicon 地址：扩展环境走 chrome-extension 的 _favicon 接口（同源、零外网请求、
+// 不向站点暴露访问痕迹）；测试环境回退为站点 favicon.ico
+function getFaviconUrl(pageUrl) {
+  if (isExtensionEnvironment && chrome.runtime && typeof chrome.runtime.getURL === 'function') {
+    try {
+      return chrome.runtime.getURL('_favicon/?pageUrl=' + encodeURIComponent(pageUrl) + '&size=32');
+    } catch (e) { /* 回退到站点 favicon */ }
+  }
+  try {
+    const url = new URL(pageUrl);
+    return `${url.protocol}//${url.hostname}/favicon.ico`;
+  } catch (e) {
+    return FALLBACK_FAVICON;
   }
 }
 
-// 从树索引取书签栏根ID（书签栏通常是根节点第一个子节点，标题兜底兼容顺序变化）
-function getBookmarkBarRootIdFromTree() {
-  const tree = bookmarkTreeIndex;
-  const root = tree && tree.nodeById.get(tree.rootId);
-  const children = (root && root.children) || [];
-  if (children.length > 0) return children[0].id;
-  const byTitle = children.find(c => /书签栏|Bookmarks bar/i.test(c.title || ''));
-  if (byTitle) return byTitle.id;
-  throw new Error('无法找到书签栏');
-}
+// ===== 书签数据访问 =====
+// 内存树索引与数据访问已抽取到共享模块 bookmark-tree.js（window.BMV.bookmarkTree），
+// popup 与检查器页（checker.html）共用，保证两处看到同一份新鲜数据。
+const BMV = window.BMV;
 
 // 检测是否在Chrome扩展环境中
 const isExtensionEnvironment = !!(typeof chrome !== 'undefined' && chrome.bookmarks);
-
-// 模拟Chrome API（用于测试环境）
-if (!isExtensionEnvironment) {
-  console.log('检测到非扩展环境，启用模拟Chrome API');
-  
-  window.chrome = {
-    bookmarks: {
-      getTree: function(callback) {
-        setTimeout(() => {
-          callback([
-            {
-              id: '0',
-              title: '',
-              children: [
-                {
-                  id: '1',
-                  title: '书签栏',
-                  children: [
-                    {
-                      id: '2',
-                      title: '开发工具',
-                      children: [
-                        { id: '3', title: 'GitHub', url: 'https://github.com' },
-                        { id: '4', title: 'Stack Overflow', url: 'https://stackoverflow.com' },
-                        { id: '5', title: 'MDN Web Docs', url: 'https://developer.mozilla.org' }
-                      ]
-                    },
-                    {
-                      id: '6',
-                      title: '搜索引擎',
-                      children: [
-                        { id: '7', title: 'Google', url: 'https://www.google.com' },
-                        { id: '8', title: 'Bing', url: 'https://www.bing.com' }
-                      ]
-                    },
-                    { id: '9', title: 'YouTube', url: 'https://www.youtube.com' },
-                    { id: '10', title: 'Wikipedia', url: 'https://www.wikipedia.org' }
-                  ]
-                }
-              ]
-            }
-          ]);
-        }, 100);
-      },
-      getChildren: function(folderId, callback) {
-        const mockData = {
-          '1': [
-            {
-              id: '2',
-              title: '开发工具',
-              children: [
-                { id: '3', title: 'GitHub', url: 'https://github.com' },
-                { id: '4', title: 'Stack Overflow', url: 'https://stackoverflow.com' },
-                { id: '5', title: 'MDN Web Docs', url: 'https://developer.mozilla.org' }
-              ]
-            },
-            {
-              id: '6',
-              title: '搜索引擎',
-              children: [
-                { id: '7', title: 'Google', url: 'https://www.google.com' },
-                { id: '8', title: 'Bing', url: 'https://www.bing.com' }
-              ]
-            },
-            { id: '9', title: 'YouTube', url: 'https://www.youtube.com' },
-            { id: '10', title: 'Wikipedia', url: 'https://www.wikipedia.org' }
-          ],
-          '2': [
-            { id: '3', title: 'GitHub', url: 'https://github.com' },
-            { id: '4', title: 'Stack Overflow', url: 'https://stackoverflow.com' },
-            { id: '5', title: 'MDN Web Docs', url: 'https://developer.mozilla.org' }
-          ],
-          '6': [
-            { id: '7', title: 'Google', url: 'https://www.google.com' },
-            { id: '8', title: 'Bing', url: 'https://www.bing.com' }
-          ]
-        };
-        
-        setTimeout(() => {
-          const result = mockData[folderId] || [];
-          console.log(`模拟获取文件夹 ${folderId} 的内容:`, result);
-          callback(result);
-        }, 50);
-      },
-      get: function(nodeId, callback) {
-        const mockNodes = {
-          '1': [{ id: '1', title: '书签栏', parentId: '0' }],
-          '2': [{ id: '2', title: '开发工具', parentId: '1' }],
-          '6': [{ id: '6', title: '搜索引擎', parentId: '1' }]
-        };
-        
-        setTimeout(() => {
-          callback(mockNodes[nodeId] || []);
-        }, 50);
-      }
-    },
-    runtime: {
-      lastError: null
-    },
-    tabs: {
-      create: function(options, callback) {
-        console.log('模拟打开标签页:', options.url);
-        window.open(options.url, '_blank');
-        if (callback) callback({ id: Date.now() });
-      }
-    }
-  };
-}
+// 注：非扩展环境（file:// 直开）的模拟 Chrome API 已抽取到 mock-chrome-api.js
 
 // 初始化
 document.addEventListener('DOMContentLoaded', function() {
-  console.log('DOM加载完成，开始初始化');
   initializeExtension();
 });
 
@@ -216,16 +50,27 @@ async function initializeExtension() {
     }
     
     // 注册变更监听并全量加载书签树（getTree 成功即代表书签权限可用）
-    registerBookmarkTreeListeners();
-    await ensureBookmarkTree();
+    BMV.bookmarkTree.registerBookmarkTreeListeners();
+    const tree = await BMV.bookmarkTree.ensureBookmarkTree();
+    
+    // 等待使用统计加载完成再首渲染，避免使用次数先显示 0；
+    // 同时清理已删除书签的孤儿统计条目
+    if (bookmarkUsageManager && bookmarkUsageManager.ready) {
+      await bookmarkUsageManager.ready;
+      bookmarkUsageManager.pruneUsageStats(new Set(tree.nodeById.keys()));
+    }
+    // popup 关闭前把防抖待写入的统计落盘
+    window.addEventListener('pagehide', () => {
+      if (bookmarkUsageManager && bookmarkUsageManager._writeNow) {
+        bookmarkUsageManager._writeNow();
+      }
+    });
     
     // 获取书签栏根ID
     if (!currentFolderId) {
-      currentFolderId = getBookmarkBarRootIdFromTree();
-      console.log('设置当前文件夹ID为:', currentFolderId);
+      currentFolderId = BMV.bookmarkTree.getBookmarkBarRootId();
     }
     
-    console.log('Chrome API检查通过，开始渲染书签');
     await renderBookmarks(currentFolderId);
     setupEventListeners();
     
@@ -273,6 +118,46 @@ function setupEventListeners() {
         await renderBookmarks(currentFolderId);
       }
     }, 200);
+  });
+
+  // 键盘支持：Esc 清空搜索；↑/↓ 在可见书签项间移动焦点（Enter 打开）
+  let kbIndex = -1;
+  const getVisibleLinks = () => Array.from(
+    document.querySelectorAll('#bookmarks .bookmark-link')
+  ).filter(link => {
+    let el = link.closest('li');
+    while (el) {
+      if (el.classList && el.classList.contains('hidden-by-search')) return false;
+      el = el.parentElement;
+    }
+    return true;
+  });
+  document.addEventListener('keydown', function(e) {
+    const inSearch = e.target === searchBox;
+    const inLink = e.target.classList && e.target.classList.contains('bookmark-link');
+    if (!inSearch && !inLink) return;
+    
+    if (e.key === 'Escape' && inSearch) {
+      if (searchBox.value) {
+        searchBox.value = '';
+        searchTerm = '';
+        clearTimeout(searchDebounceTimer);
+        renderBookmarks(currentFolderId);
+      }
+      return;
+    }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    
+    const links = getVisibleLinks();
+    if (links.length === 0) return;
+    e.preventDefault();
+    document.querySelectorAll('.keyboard-focus').forEach(el => el.classList.remove('keyboard-focus'));
+    kbIndex = e.key === 'ArrowDown'
+      ? (kbIndex + 1) % links.length
+      : (kbIndex <= 0 ? links.length - 1 : kbIndex - 1);
+    const target = links[kbIndex];
+    target.classList.add('keyboard-focus');
+    target.focus();
   });
 
   // 书签容器事件委托（点击/右键/favicon 兜底统一处理，监听器数量 O(1)）
@@ -373,8 +258,6 @@ function setupBookmarksDelegation() {
 let searchRequestId = 0;
 async function renderSearchResults() {
   const requestId = ++searchRequestId;
-  console.log('=== 渲染搜索结果 ===');
-  console.log('搜索词:', searchTerm);
   const bookmarksContainer = document.getElementById('bookmarks');
   
   // 显示加载状态
@@ -382,7 +265,7 @@ async function renderSearchResults() {
   
   try {
     // 获取所有书签
-    const allBookmarks = await getAllBookmarks();
+    const allBookmarks = await BMV.bookmarkTree.getAllBookmarks();
     // 竞态防护：加载期间又有新搜索或切回文件夹视图时，丢弃本次过期响应
     if (requestId !== searchRequestId) return;
     
@@ -390,8 +273,6 @@ async function renderSearchResults() {
     const filteredBookmarks = allBookmarks.filter(bookmark => 
         bookmark.url && (isSearchMatch(bookmark.title, searchTerm) || isSearchMatch(bookmark.url, searchTerm))
       );
-    
-    console.log('搜索结果:', filteredBookmarks.length);
     
     if (filteredBookmarks.length === 0) {
       bookmarksContainer.innerHTML = `
@@ -419,8 +300,8 @@ async function renderSearchResults() {
     breadcrumbContainer.style.display = 'flex';
     
     // 更新统计信息
-    const statsElement = document.getElementById('stats');
-    statsElement.innerHTML = `<span style="color: #4a90e2;">${filteredBookmarks.length} 个匹配书签</span>`;
+    viewState.matchCount = filteredBookmarks.length;
+    renderStats();
     
     // 显示结果（分批渲染 + 委托数据映射）
     const resultsContainer = document.createElement('ul');
@@ -472,20 +353,14 @@ async function createSearchResultItem(bookmark) {
   currentRenderData.set(bookmark.id, bookmark);
   
   // 获取文件夹路径
-  const folderPath = await getFolderPath(bookmark.parentId);
+  const folderPath = await BMV.bookmarkTree.getFolderPath(bookmark.parentId);
   
   // 获取使用统计
   const usageCount = bookmarkUsageManager.getUsageCount(bookmark.id);
   const usageText = bookmarkUsageManager.formatUsageCount(usageCount);
   
   // 获取favicon
-  let faviconUrl;
-  try {
-    const url = new URL(bookmark.url);
-    faviconUrl = `${url.protocol}//${url.hostname}/favicon.ico`;
-  } catch (e) {
-    faviconUrl = FALLBACK_FAVICON;
-  }
+  const faviconUrl = getFaviconUrl(bookmark.url);
   
   // 构建工具提示信息
   let tooltipText = bookmark.title;
@@ -510,7 +385,6 @@ ${bookmark.url}`;
 
 // 渲染书签
 async function renderBookmarks(folderId) {
-  console.log('开始渲染书签，文件夹ID:', folderId);
   const bookmarksContainer = document.getElementById('bookmarks');
   
   // 显示加载状态
@@ -522,7 +396,7 @@ async function renderBookmarks(folderId) {
       throw new Error('找不到书签容器元素');
     }
     
-    const bookmarks = await getBookmarks(folderId);
+    const bookmarks = await BMV.bookmarkTree.getBookmarks(folderId);
     await updateBreadcrumb(folderId);
     
     if (!bookmarks || bookmarks.length === 0) {
@@ -583,9 +457,6 @@ async function renderBookmarks(folderId) {
     
     // 重新应用搜索过滤
     applySearchFilter();
-    
-    console.log('书签渲染完成，书签数:', bookmarkCount, '文件夹数:', folderCount);
-    
   } catch (error) {
     console.error('渲染书签时出错:', error);
     const errorMessage = error.message || '未知错误';
@@ -608,7 +479,7 @@ async function updateBreadcrumb(folderId) {
   const breadcrumbContainer = document.getElementById('breadcrumb');
   
   try {
-    const path = await buildBreadcrumbPath(folderId);
+    const path = await BMV.bookmarkTree.buildBreadcrumbPath(folderId);
     
     if (path.length === 0) {
       breadcrumbContainer.style.display = 'none';
@@ -647,42 +518,6 @@ async function updateBreadcrumb(folderId) {
   }
 }
 
-// 构建面包屑路径（基于内存树索引的父链遍历，零 IPC）
-async function buildBreadcrumbPath(folderId) {
-  const path = [];
-  try {
-    const tree = await ensureBookmarkTree();
-    let currentId = folderId;
-    while (currentId && currentId !== tree.rootId) {
-      const node = tree.nodeById.get(currentId);
-      if (!node) break;
-      path.unshift({
-        id: node.id,
-        title: node.title || '书签栏'
-      });
-      currentId = node.parentId;
-    }
-  } catch (error) {
-    console.error('构建面包屑路径时出错:', error);
-  }
-  return path;
-}
-
-// 获取文件夹路径
-async function getFolderPath(parentId) {
-  if (!parentId || parentId === '0') {
-    return '书签栏';
-  }
-  
-  try {
-    const path = await buildBreadcrumbPath(parentId);
-    return path.map(item => item.title).join(' › ') || '书签栏';
-  } catch (error) {
-    console.error('获取文件夹路径失败:', error);
-    return '未知位置';
-  }
-}
-
 // 创建书签元素（事件统一由 #bookmarks 容器委托处理，此处只挂数据）
 function createBookmarkElement(bookmark) {
   const listItem = document.createElement('li');
@@ -701,7 +536,7 @@ function createBookmarkElement(bookmark) {
     // 异步加载并显示文件夹预览
     (async () => {
       try {
-        const children = await getBookmarks(bookmark.id);
+        const children = await BMV.bookmarkTree.getBookmarks(bookmark.id);
         if (children.length > 0) {
       const nestedList = document.createElement('ul');
       nestedList.className = 'nested-list';
@@ -723,14 +558,8 @@ function createBookmarkElement(bookmark) {
         const usageText = bookmarkUsageManager.formatUsageCount(usageCount);
         const lastUsed = bookmarkUsageManager.formatLastUsed(bookmarkUsageManager.getLastUsed(child.id));
         
-        // 从URL中提取域名，直接获取网站的favicon
-        let nestedFaviconUrl;
-        try {
-          const url = new URL(child.url);
-          nestedFaviconUrl = `${url.protocol}//${url.hostname}/favicon.ico`;
-        } catch (e) {
-          nestedFaviconUrl = FALLBACK_FAVICON;
-        }
+        // 获取favicon
+        const nestedFaviconUrl = getFaviconUrl(child.url);
         
         // 构建工具提示信息
         let tooltipText = child.title;
@@ -781,14 +610,8 @@ function createBookmarkElement(bookmark) {
     const usageText = bookmarkUsageManager.formatUsageCount(usageCount);
     const lastUsed = bookmarkUsageManager.formatLastUsed(bookmarkUsageManager.getLastUsed(bookmark.id));
     
-    // 从URL中提取域名，直接获取网站的favicon
-    let faviconUrl;
-    try {
-      const url = new URL(bookmark.url);
-      faviconUrl = `${url.protocol}//${url.hostname}/favicon.ico`;
-    } catch (e) {
-      faviconUrl = FALLBACK_FAVICON;
-    }
+    // 获取favicon
+    const faviconUrl = getFaviconUrl(bookmark.url);
     
     // 获取文件夹路径（仅在搜索模式下显示）
     let folderPathText = '';
@@ -799,7 +622,7 @@ function createBookmarkElement(bookmark) {
       // 立即调用异步函数
       (async () => {
         try {
-          folderPathText = await getFolderPath(bookmark.parentId);
+          folderPathText = await BMV.bookmarkTree.getFolderPath(bookmark.parentId);
           // 更新路径显示
           const pathElement = listItem.querySelector('.bookmark-path');
           if (pathElement) {
@@ -835,65 +658,12 @@ function createBookmarkElement(bookmark) {
   return listItem;
 }
 
-// 递归获取所有书签（基于内存树索引，零 IPC）
-function getAllBookmarks() {
-  return ensureBookmarkTree().then(tree => {
-    const allBookmarks = [];
-    tree.nodeById.forEach((node, id) => {
-      if (id === tree.rootId) return; // 排除根节点自身
-      allBookmarks.push({ ...node });
-    });
-    return allBookmarks;
-  });
-}
-
-// 获取特定文件夹的书签（优先读内存树索引，零 IPC；树不可用时回退 API）
-async function getBookmarks(folderId) {
-  if (!folderId) {
-    throw new Error('文件夹ID无效');
-  }
-  if (!chrome || !chrome.bookmarks) {
-    throw new Error('Chrome书签API不可用');
-  }
-  
-  try {
-    const tree = await ensureBookmarkTree();
-    const node = tree.nodeById.get(folderId);
-    if (node) {
-      return node.children ? node.children.slice() : [];
-    }
-  } catch (error) {
-    console.warn('内存树获取失败，回退到 API:', error);
-  }
-  
-  return new Promise((resolve, reject) => {
-    chrome.bookmarks.getChildren(folderId, function(bookmarks) {
-      if (chrome.runtime.lastError) {
-        reject(new Error(`获取书签失败: ${chrome.runtime.lastError.message}`));
-      } else {
-        resolve(bookmarks || []);
-      }
-    });
-  });
-}
-
 // 搜索过滤功能
 function applySearchFilter() {
-  console.log('=== 搜索过滤调试信息 ===');
-  console.log('搜索词:', searchTerm);
-  console.log('当前文件夹ID:', currentFolderId);
-  
   // 包含所有类型的项目：主书签、文件夹、嵌套书签
   const allItems = document.querySelectorAll('.bookmark-item, .folder-item, .nested-item');
-  console.log('找到项目数量:', allItems.length);
-  console.log('项目类型分布:', {
-    bookmarkItems: document.querySelectorAll('.bookmark-item').length,
-    folderItems: document.querySelectorAll('.folder-item').length,
-    nestedItems: document.querySelectorAll('.nested-item').length
-  });
   
   if (!searchTerm) {
-    // console.log('清除搜索，显示所有项目');
     // 清除搜索时显示所有项目
     allItems.forEach(item => {
       item.classList.remove('hidden-by-search');
@@ -910,7 +680,6 @@ function applySearchFilter() {
     return;
   }
   
-  const searchLower = searchTerm.toLowerCase();
   let matchCount = 0;
   let totalCount = 0;
   
@@ -921,10 +690,11 @@ function applySearchFilter() {
     const titleElement = item.querySelector('.bookmark-title') || item.querySelector('.folder-title');
     const text = titleElement ? titleElement.textContent : item.textContent;
     
-    // 使用增强的搜索匹配函数
+    // 使用增强的搜索匹配函数（与全局搜索保持一致：传原始 searchTerm，
+    // isSearchMatch 内部自行处理大小写）
     const isMatch = typeof isSearchMatch === 'function' 
-      ? isSearchMatch(text, searchLower)
-      : text.toLowerCase().includes(searchLower);
+      ? isSearchMatch(text, searchTerm)
+      : text.toLowerCase().includes(searchTerm.toLowerCase());
       
     if (isMatch) {
       matchCount++;
@@ -942,7 +712,6 @@ function applySearchFilter() {
         const parentFolder = item.closest('.folder-item');
         if (parentFolder) {
           parentFolder.classList.remove('hidden-by-search');
-          console.log('显示嵌套项目的父文件夹');
         }
       }
     } else {
@@ -950,84 +719,60 @@ function applySearchFilter() {
     }
   });
   
-  // 搜索结果统计已通过UI展示，移除控制台日志
-    /* console.log('搜索结果:', {
-      matchCount: matchCount,
-      totalCount: totalCount,
-      searchTerm: searchTerm
-    }); */
-  
   // 更新搜索状态显示
   updateSearchStatus(matchCount, totalCount);
+}
+
+// 视图状态：统计信息的唯一数据源（避免从 DOM textContent 回读导致错乱）
+const viewState = {
+  bookmarkCount: 0,
+  folderCount: 0,
+  matchCount: 0
+};
+
+// 渲染统计栏（唯一出口）
+function renderStats() {
+  const statsElement = document.getElementById('stats');
+  if (!statsElement) return;
+  if (searchTerm) {
+    const color = viewState.matchCount > 0 ? '#4a90e2' : '#ff6b6b';
+    const icon = viewState.matchCount > 0 ? '🔍' : '❌';
+    statsElement.innerHTML = `<span style="color: ${color};">${icon} 搜索结果: ${viewState.matchCount} 项</span>`;
+  } else {
+    statsElement.innerHTML = `<span id="bookmark-count">${viewState.bookmarkCount}</span> 个书签 | <span id="folder-count">${viewState.folderCount}</span> 个文件夹`;
+  }
 }
 
 // 更新搜索状态显示
 function updateSearchStatus(matchCount, totalCount) {
   const searchBox = document.getElementById('search-box');
-  const statsElement = document.getElementById('stats');
+  viewState.matchCount = searchTerm ? matchCount : 0;
   
-  if (searchTerm && searchBox) {
-    // 显示搜索结果状态
-    searchBox.classList.add('search-active');
-    if (matchCount === 0) {
-      searchBox.classList.add('search-no-results');
-    } else {
-      searchBox.classList.remove('search-no-results');
-    }
-    searchBox.title = `找到 ${matchCount} 个匹配项（共 ${totalCount} 项）`;
-  } else if (searchBox) {
-    // 清除搜索状态
-    searchBox.classList.remove('search-active', 'search-no-results');
-    searchBox.title = '';
-  }
-  
-  // 在统计信息中显示搜索结果
-  if (statsElement) {
+  if (searchBox) {
     if (searchTerm) {
-      // 显示搜索结果
-      const bookmarkCountEl = document.getElementById('bookmark-count');
-      const folderCountEl = document.getElementById('folder-count');
-      const bookmarkCount = bookmarkCountEl ? bookmarkCountEl.textContent : '0';
-      const folderCount = folderCountEl ? folderCountEl.textContent : '0';
-      
-      const resultColor = matchCount > 0 ? '#4a90e2' : '#ff6b6b';
-      const resultIcon = matchCount > 0 ? '🔍' : '❌';
-      statsElement.innerHTML = `${bookmarkCount} 个书签 | ${folderCount} 个文件夹 | <span style="color: ${resultColor};">${resultIcon} 搜索结果: ${matchCount} 项</span>`;
+      // 显示搜索结果状态
+      searchBox.classList.add('search-active');
+      if (matchCount === 0) {
+        searchBox.classList.add('search-no-results');
+      } else {
+        searchBox.classList.remove('search-no-results');
+      }
+      searchBox.title = `找到 ${matchCount} 个匹配项（共 ${totalCount} 项）`;
     } else {
-      // 清除搜索结果显示，恢复原始统计
-      const bookmarkCountEl = document.getElementById('bookmark-count');
-      const folderCountEl = document.getElementById('folder-count');
-      const bookmarkCount = bookmarkCountEl ? bookmarkCountEl.textContent : '0';
-      const folderCount = folderCountEl ? folderCountEl.textContent : '0';
-      
-      statsElement.innerHTML = `<span id="bookmark-count">${bookmarkCount}</span> 个书签 | <span id="folder-count">${folderCount}</span> 个文件夹`;
+      // 清除搜索状态
+      searchBox.classList.remove('search-active', 'search-no-results');
+      searchBox.title = '';
     }
   }
+  
+  renderStats();
 }
 
 // 更新统计信息
 function updateStats(bookmarkCount, folderCount) {
-  const bookmarkCountEl = document.getElementById('bookmark-count');
-  const folderCountEl = document.getElementById('folder-count');
-  const statsElement = document.getElementById('stats');
-  
-  if (bookmarkCountEl) bookmarkCountEl.textContent = bookmarkCount;
-  if (folderCountEl) folderCountEl.textContent = folderCount;
-  
-  // 如果有搜索词，重新应用搜索状态显示
-  if (searchTerm && statsElement) {
-    // 延迟执行，确保DOM已更新
-    setTimeout(() => {
-      // 包含所有类型的项目：主书签、文件夹、嵌套书签
-      const allItems = document.querySelectorAll('.bookmark-item, .folder-item, .nested-item');
-      const visibleItems = Array.from(allItems).filter(item => !item.classList.contains('hidden-by-search'));
-      const matchCount = visibleItems.length;
-      const totalCount = allItems.length;
-      
-      // 更新搜索状态显示
-      updateSearchStatus(matchCount, totalCount);
-    }, 0);
-  }
+  viewState.bookmarkCount = bookmarkCount;
+  viewState.folderCount = folderCount;
+  renderStats();
 }
 
 // 右键菜单功能
@@ -1140,16 +885,17 @@ function showContextMenu(event, bookmark) {
   }
   
   contextMenu.style.display = 'block';
-  contextMenu.style.left = event.pageX + 'px';
-  contextMenu.style.top = event.pageY + 'px';
+  // 使用视口坐标 + fixed 定位（原 pageX/pageY + absolute 在页面滚动后会错位）
+  contextMenu.style.left = event.clientX + 'px';
+  contextMenu.style.top = event.clientY + 'px';
   
   // 确保菜单不会超出视窗
   const rect = contextMenu.getBoundingClientRect();
   if (rect.right > window.innerWidth) {
-    contextMenu.style.left = (event.pageX - rect.width) + 'px';
+    contextMenu.style.left = Math.max(0, window.innerWidth - rect.width) + 'px';
   }
   if (rect.bottom > window.innerHeight) {
-    contextMenu.style.top = (event.pageY - rect.height) + 'px';
+    contextMenu.style.top = Math.max(0, window.innerHeight - rect.height) + 'px';
   }
 }
 
@@ -1191,7 +937,7 @@ function handleContextMenuAction(action, bookmark) {
           if (chrome.runtime.lastError) {
             console.error('删除书签失败:', chrome.runtime.lastError);
           } else {
-            invalidateBookmarkTree(); // 内存树失效，下次读取自动重建
+            BMV.bookmarkTree.invalidateBookmarkTree(); // 内存树失效，下次读取自动重建
             // 重新渲染当前文件夹
             renderBookmarks(currentFolderId);
           }
@@ -1199,13 +945,15 @@ function handleContextMenuAction(action, bookmark) {
       }
       break;
     case 'check-validity':
+      if (typeof bookmarkChecker === 'undefined') {
+        alert('书签检查器未加载，请重新加载扩展');
+        break;
+      }
+      // 打开独立检查器页（书签单个 / 文件夹整检），长任务不受 popup 关闭影响
       if (bookmark.url) {
-        bookmarkChecker.checkSingle(bookmark).then(result => {
-          bookmarkChecker.results.set(bookmark.id, { ...result, title: bookmark.title, url: bookmark.url });
-          bookmarkChecker.showResultsDialog();
-        });
+        bookmarkChecker.openCheckerPage({ bookmark: bookmark.id });
       } else {
-        bookmarkChecker.checkFolderBookmarks(bookmark.id, bookmark.title);
+        bookmarkChecker.openCheckerPage({ folder: bookmark.id });
       }
       break;
   }
@@ -1282,9 +1030,8 @@ function saveEdit() {
         console.error('更新书签失败:', chrome.runtime.lastError);
         alert('保存失败: ' + chrome.runtime.lastError.message);
       } else {
-        console.log('书签更新成功:', result);
         hideEditDialog();
-        invalidateBookmarkTree(); // 内存树失效，下次读取自动重建
+        BMV.bookmarkTree.invalidateBookmarkTree(); // 内存树失效，下次读取自动重建
         // 重新渲染当前文件夹
         renderBookmarks(currentFolderId);
       }
@@ -1335,9 +1082,8 @@ function updateBookmarkToCurrentUrl(bookmark) {
             console.error('更新书签失败:', chrome.runtime.lastError);
             alert('更新书签失败: ' + chrome.runtime.lastError.message);
           } else {
-            console.log('书签更新成功:', result);
             alert(`书签已成功更新为当前页面！\n标题: ${currentTitle}`);
-            invalidateBookmarkTree(); // 内存树失效，下次读取自动重建
+            BMV.bookmarkTree.invalidateBookmarkTree(); // 内存树失效，下次读取自动重建
             // 重新渲染当前文件夹
             renderBookmarks(currentFolderId);
           }
