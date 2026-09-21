@@ -66,12 +66,18 @@ async function initializeExtension() {
       }
     });
     
+    // 等待视图设置（列数/预览数）加载完成再首渲染，避免先跳变再纠正
+    if (typeof bookmarkViewSettings !== 'undefined' && bookmarkViewSettings.ready) {
+      await bookmarkViewSettings.ready();
+    }
+    
     // 获取书签栏根ID
     if (!currentFolderId) {
       currentFolderId = BMV.bookmarkTree.getBookmarkBarRootId();
     }
     
     await renderBookmarks(currentFolderId);
+    setupViewSettings();
     setupEventListeners();
     
     // 渲染检查按钮
@@ -96,6 +102,35 @@ async function initializeExtension() {
       }
     }
   }
+}
+
+// 视图设置（每行列数 / 每卡预览数）：初始化选中值、change 即时保存并重渲
+function setupViewSettings() {
+  const columnsSel = document.getElementById('setting-columns');
+  const previewSel = document.getElementById('setting-preview');
+  const hint = document.getElementById('view-settings-hint');
+  if (!columnsSel || !previewSel) return;
+
+  const apply = () => {
+    const s = bookmarkViewSettings.get();
+    columnsSel.value = String(s.columns);
+    previewSel.value = String(s.preview);
+    if (hint) {
+      hint.textContent = `${s.columns} 列 · 每卡 ${s.preview > 0 ? s.preview + ' 项' : '不显示预览'}`;
+    }
+  };
+  apply();
+
+  const onChange = async () => {
+    await bookmarkViewSettings.save({
+      columns: Number(columnsSel.value),
+      preview: Number(previewSel.value)
+    });
+    apply();
+    await renderBookmarks(currentFolderId); // 即时重渲当前视图
+  };
+  columnsSel.addEventListener('change', onChange);
+  previewSel.addEventListener('change', onChange);
 }
 
 // 设置事件监听器（幂等：初始化重试不会重复绑定）
@@ -260,6 +295,10 @@ async function renderSearchResults() {
   const requestId = ++searchRequestId;
   const bookmarksContainer = document.getElementById('bookmarks');
   
+  // 搜索结果页隐藏视图设置行（设置只作用于网格视图）
+  const settingsRow = document.getElementById('view-settings');
+  if (settingsRow) settingsRow.style.display = 'none';
+  
   // 显示加载状态
   bookmarksContainer.innerHTML = '<div class="loading">正在搜索所有书签...</div>';
   
@@ -387,6 +426,10 @@ ${bookmark.url}`;
 async function renderBookmarks(folderId) {
   const bookmarksContainer = document.getElementById('bookmarks');
   
+  // 恢复视图设置行（搜索页会隐藏它）
+  const settingsRow = document.getElementById('view-settings');
+  if (settingsRow) settingsRow.style.display = '';
+  
   // 显示加载状态
   bookmarksContainer.innerHTML = '<div class="loading">正在加载书签...</div>';
   
@@ -405,9 +448,12 @@ async function renderBookmarks(folderId) {
       return;
     }
 
-    // 创建网格容器
+    // 创建网格容器（列数由视图设置控制）
     const gridContainer = document.createElement('ul');
     gridContainer.className = 'bookmark-grid';
+    const viewSettings = (typeof bookmarkViewSettings !== 'undefined') ? bookmarkViewSettings.get() : null;
+    const columns = (viewSettings && viewSettings.columns) || 3;
+    gridContainer.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
     
     // 判断是否为文件夹视图
     const isFolder = bookmarks.some(bookmark => bookmark.children);
@@ -533,8 +579,10 @@ function createBookmarkElement(bookmark) {
       </div>
     `;
     
-    // 异步加载并显示文件夹预览
+    // 异步加载并显示文件夹预览（预览数由视图设置控制，0 表示不渲染）
     (async () => {
+      const previewCount = (typeof bookmarkViewSettings !== 'undefined') ? bookmarkViewSettings.get().preview : 5;
+      if (previewCount <= 0) return;
       try {
         const children = await BMV.bookmarkTree.getBookmarks(bookmark.id);
         if (children.length > 0) {
@@ -548,7 +596,7 @@ function createBookmarkElement(bookmark) {
       const sortedBookmarks = bookmarkUsageManager.sortBookmarksByUsage(bookmarkChildren);
       
       // 显示前5个子项作为预览
-      const previewItems = sortedBookmarks.slice(0, 5);
+      const previewItems = sortedBookmarks.slice(0, previewCount);
       previewItems.forEach(child => {
         const nestedItem = document.createElement('li');
         nestedItem.className = 'nested-item';
@@ -585,11 +633,11 @@ function createBookmarkElement(bookmark) {
         nestedList.appendChild(nestedItem);
       });
       
-      if (bookmarkChildren.length > 5) {
+      if (bookmarkChildren.length > previewCount) {
         const moreItem = document.createElement('li');
         moreItem.className = 'nested-item more-items-link';
         moreItem.dataset.folderId = bookmark.id;
-        moreItem.innerHTML = `<span>还有 ${bookmarkChildren.length - 5} 个项目...</span>`;
+        moreItem.innerHTML = `<span>还有 ${bookmarkChildren.length - previewCount} 个项目...</span>`;
         moreItem.title = `点击查看 ${bookmark.title} 文件夹中的所有项目`;
         nestedList.appendChild(moreItem);
       }

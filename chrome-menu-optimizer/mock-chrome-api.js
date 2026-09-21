@@ -109,11 +109,31 @@
     },
     storage: {
       local: {
+        // 用 localStorage 做持久化后备，行为与真实 chrome.storage.local 一致
         get: function (keys) {
-          return Promise.resolve({});
+          return new Promise((resolve) => {
+            const result = {};
+            const keyList = Array.isArray(keys) ? keys : (keys ? [keys] : Object.keys(localStorage));
+            keyList.forEach(k => {
+              const raw = localStorage.getItem(k);
+              if (raw !== null) {
+                try { result[k] = JSON.parse(raw); } catch (e) { result[k] = raw; }
+              }
+            });
+            resolve(result);
+          });
         },
         set: function (items) {
-          return Promise.resolve();
+          return new Promise((resolve) => {
+            Object.keys(items).forEach(k => localStorage.setItem(k, JSON.stringify(items[k])));
+            resolve();
+          });
+        },
+        remove: function (keys) {
+          return new Promise((resolve) => {
+            (Array.isArray(keys) ? keys : [keys]).forEach(k => localStorage.removeItem(k));
+            resolve();
+          });
         }
       }
     }

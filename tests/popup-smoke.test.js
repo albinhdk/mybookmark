@@ -4,7 +4,8 @@
 //   msedge --headless=new --remote-debugging-port=9333 --user-data-dir=%TEMP%\dsh-popup-smoke ^
 //     --no-first-run file:///D:/workspace/mybookmark/chrome-menu-optimizer/popup.html
 const PORT = 9333;
-const POPUP_URL_MARK = 'popup.html';
+const POPUP_URL = 'file:///D:/workspace/mybookmark/chrome-menu-optimizer/popup.html';
+const CHECKER_URL = 'file:///D:/workspace/mybookmark/chrome-menu-optimizer/checker.html';
 
 const results = [];
 function check(name, cond, extra) {
@@ -14,17 +15,20 @@ function check(name, cond, extra) {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 (async () => {
-  // 1. 等待 CDP 端口就绪
+  // 1. 等待 CDP 端口就绪；连接任意页面目标（上次运行可能停在 checker.html）
   let list = null;
   for (let i = 0; i < 20; i++) {
     try {
       list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-      if (list.some(t => t.type === 'page' && t.url.includes(POPUP_URL_MARK))) break;
+      if (list.some(t => t.type === 'page')) break;
     } catch (e) { /* 端口未起 */ }
     await sleep(500);
   }
-  const page = (list || []).find(t => t.type === 'page' && t.url.includes(POPUP_URL_MARK));
-  if (!page) { console.log('找不到 popup.html 页面目标（Edge 是否已按前置条件启动？）'); process.exit(1); }
+  // 优先连接我们的页面目标（popup.html / checker.html）；
+  // 都没有时（比如停在 sync-confirmation 页）取首个页面目标，由后续 Page.navigate 纠正
+  const ourPage = (list || []).find(t => t.type === 'page' && (t.url.includes('popup.html') || t.url.includes('checker.html')));
+  const page = ourPage || (list || []).find(t => t.type === 'page');
+  if (!page) { console.log('找不到页面目标（Edge 是否已按前置条件启动？）'); process.exit(1); }
 
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   const pending = new Map();
@@ -49,13 +53,31 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await send('Runtime.enable');
   await send('Page.enable');
   // 重新加载页面，保证测试从初始状态开始（可重复运行）
-  await send('Page.navigate', { url: page.url });
+  await send('Page.navigate', { url: POPUP_URL });
+  await sleep(1200);
+  // 清空 localStorage（mock storage 的后备），保证默认值断言确定性
+  await send('Runtime.evaluate', { expression: 'localStorage.clear()' });
+  await send('Page.navigate', { url: POPUP_URL });
   await sleep(1500);
 
   const evalJs = async (expr) => {
     const r = await send('Runtime.evaluate', { expression: `(async () => { ${expr} })()`, returnByValue: true, awaitPromise: true });
     if (r.result?.exceptionDetails) return { __error: r.result.exceptionDetails.text };
     return r.result?.result?.value;
+  };
+
+  // 轮询等待页面条件满足（页面重载后元素就绪比固定 sleep 可靠）
+  async function waitFor(condFn, timeoutMs, label) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      let ok = false;
+      try { ok = await condFn(); } catch (e) { ok = false; }
+      if (ok) return true;
+      await sleep(300);
+    }
+    const diag = await evalJs(`return { href: location.href, ready: document.readyState, hasRow: !!document.getElementById('view-settings'), body: (document.body ? document.body.innerHTML.length : -1) };`);
+    console.log(`  [waitFor 超时] ${label}: ${JSON.stringify(diag)}`);
+    return false;
   };
 
   // ===== 冒烟项 =====
@@ -101,6 +123,17 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   check('搜索 "git" 命中 1 条（GitHub）', searchCount === 1, searchCount);
   const crumbSearch = await evalJs(`return document.getElementById('breadcrumb').textContent;`);
   check('面包屑切换为搜索状态', crumbSearch.includes('搜索结果'), crumbSearch);
+  const rowHiddenInSearch = await evalJs(`return document.getElementById('view-settings').style.display;`);
+  check('搜索时视图设置行隐藏', rowHiddenInSearch === 'none', rowHiddenInSearch);
+  await evalJs(`
+    const box = document.getElementById('search-box');
+    box.value = '';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  await sleep(600);
+  const rowRestored = await evalJs(`return document.getElementById('view-settings').style.display;`);
+  check('清空搜索后设置行恢复', rowRestored !== 'none', rowRestored);
 
   console.log('[F] 分批加载（300 个大文件夹）');
   await evalJs(`
@@ -167,9 +200,43 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const menuPos = await evalJs(`return { pos: getComputedStyle(document.getElementById('context-menu')).position };`);
   check('菜单为 fixed 定位', menuPos.pos === 'fixed', menuPos.pos);
 
+  console.log('[I] 视图设置（列数/预览数可配置）');
+  // 重载页面：恢复原始 mock 树（[F] 替换成了 300 条大数据树）与默认设置，
+  // 并回到根目录视图（预览断言需要根视图里的文件夹卡片）
+  await send('Page.navigate', { url: POPUP_URL });
+  await waitFor(() => evalJs(`return !!document.getElementById('setting-columns') && !!document.querySelector('.bookmark-grid');`), 8000, '视图设置行');
+  const setDefaults = await evalJs(`return { row: !!document.getElementById('view-settings'), columns: document.getElementById('setting-columns').value, preview: document.getElementById('setting-preview').value, hint: document.getElementById('view-settings-hint').textContent };`);
+  check('设置行存在且默认 3 列 / 5 预览', setDefaults.row === true && setDefaults.columns === '3' && setDefaults.preview === '5', JSON.stringify(setDefaults));
+  const gridTracks = (n) => evalJs(`return getComputedStyle(document.querySelector('.bookmark-grid')).gridTemplateColumns.split(' ').filter(Boolean).length;`) ;
+  check('默认网格 3 等分', (await gridTracks()) === 3);
+  // 改列数为 2 → 即时生效
+  await evalJs(`const s = document.getElementById('setting-columns'); s.value = '2'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
+  await sleep(400);
+  check('选 2 列后网格 2 等分', (await gridTracks()) === 2);
+  const hint2 = await evalJs(`return document.getElementById('view-settings-hint').textContent;`);
+  check('提示文案同步更新', hint2.includes('2 列'), hint2);
+  // 预览改为 0 → 嵌套预览消失
+  await evalJs(`const s = document.getElementById('setting-preview'); s.value = '0'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
+  await sleep(500);
+  const nested0 = await evalJs(`return { nested: document.querySelectorAll('.nested-item').length, more: document.querySelectorAll('.more-items-link').length };`);
+  check('预览=0 时嵌套项与"还有X个"都消失', nested0.nested === 0 && nested0.more === 0, JSON.stringify(nested0));
+  // 预览改为 3 → 每个文件夹卡片最多 3 个嵌套项
+  await evalJs(`const s = document.getElementById('setting-preview'); s.value = '3'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
+  await sleep(500);
+  const nested3 = await evalJs(`
+    const lists = Array.from(document.querySelectorAll('.nested-list'));
+    return { lists: lists.length, maxItems: Math.max(0, ...lists.map(l => l.querySelectorAll('.nested-item').length)) };
+  `);
+  check('预览=3 时每卡嵌套 ≤3', nested3.lists === 2 && nested3.maxItems <= 3, JSON.stringify(nested3));
+  // 持久化：reload 后仍是 2 列 / 3 预览
+  await send('Page.navigate', { url: POPUP_URL });
+  await waitFor(() => evalJs(`return !!document.getElementById('setting-columns') && !!document.querySelector('.bookmark-grid');`), 8000, '持久化重载');
+  const persisted = await evalJs(`return { columns: document.getElementById('setting-columns').value, preview: document.getElementById('setting-preview').value, tracks: getComputedStyle(document.querySelector('.bookmark-grid')).gridTemplateColumns.split(' ').filter(Boolean).length };`);
+  check('reload 后设置保持（2 列 / 3 预览）', persisted.columns === '2' && persisted.preview === '3' && persisted.tracks === 2, JSON.stringify(persisted));
+
   console.log('[J] 检查器独立页（checker.html，不再受 popup 生命周期影响）');
-  await send('Page.navigate', { url: 'file:///D:/workspace/mybookmark/chrome-menu-optimizer/checker.html' });
-  await sleep(1000);
+  await send('Page.navigate', { url: CHECKER_URL });
+  await waitFor(() => evalJs(`return document.querySelectorAll('.checker-table tbody tr').length > 0;`), 20000, '检查器结果');
   // 轮询等待检查完成（结果表格出现）；网络可达与否都会产生结果行
   let rows = 0;
   for (let i = 0; i < 40; i++) {

@@ -138,15 +138,47 @@
         color: var(--text-secondary);
       }
 
+      /* 视图设置行（每行列数 / 每卡预览数） */
+      #view-settings {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 6px 20px;
+        background: var(--surface-color);
+        border-bottom: 1px solid var(--border-color);
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+
+      #view-settings label {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        white-space: nowrap;
+      }
+
+      #view-settings select {
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: white;
+        color: var(--text-primary);
+        font-size: 12px;
+        padding: 2px 4px;
+        cursor: pointer;
+      }
+
+      #view-settings-hint {
+        margin-left: auto;
+      }
+
       #bookmarks {
         padding: 20px;
         background: var(--background-color);
       }
 
-      /* 网格布局 - 实现真正的平铺效果 */
+      /* 网格布局 - 列数由视图设置动态控制（grid-template-columns 内联设置） */
       .bookmark-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
         gap: 12px;
         margin: 0;
         padding: 0;
@@ -154,7 +186,6 @@
       }
 
       .folder-view .bookmark-grid {
-        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
         gap: 10px;
       }
 
@@ -734,6 +765,29 @@
     </div>
     
     <div id="breadcrumb"></div>
+
+    <div id="view-settings">
+      <label>每行
+        <select id="setting-columns">
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+        </select>
+        列
+      </label>
+      <label>每卡预览
+        <select id="setting-preview">
+          <option value="0">不显示</option>
+          <option value="3">3</option>
+          <option value="5">5</option>
+          <option value="8">8</option>
+          <option value="10">10</option>
+        </select>
+        项
+      </label>
+      <span id="view-settings-hint"></span>
+    </div>
     
     <div id="bookmarks">
       <div class="loading">正在加载书签</div>
@@ -789,6 +843,7 @@
   <script src="error-handler.js"></script>
   <script src="bookmark-tree.js"></script>
   <script src="bookmark-checker.js"></script>
+  <script src="view-settings.js"></script>
   <script src="usage-manager.js"></script>
   <script src="pinyin-search.js"></script>
   <script src="popup.js"></script>
