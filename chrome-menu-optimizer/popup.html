@@ -696,6 +696,210 @@
       .btn-secondary:hover {
         background: var(--border-color);
       }
+
+      /* 检查书签按钮 */
+      .check-all-btn {
+        background: rgba(255,255,255,0.2);
+        color: white;
+        border: 1px solid rgba(255,255,255,0.4);
+        padding: 4px 12px;
+        border-radius: 16px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: var(--transition);
+        margin-left: 12px;
+        vertical-align: middle;
+      }
+      .check-all-btn:hover {
+        background: rgba(255,255,255,0.35);
+      }
+
+      /* 检查器对话框 */
+      .checker-dialog {
+        position: fixed;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        z-index: 3000;
+      }
+      .checker-overlay {
+        position: absolute;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        background: rgba(0,0,0,0.5);
+        backdrop-filter: blur(4px);
+      }
+      .checker-content {
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        background: var(--background-color);
+        border-radius: var(--border-radius);
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        width: 90%;
+        max-width: 520px;
+        max-height: 85vh;
+        overflow: hidden;
+        animation: dialogSlideIn 0.3s ease-out;
+      }
+      .checker-results {
+        max-width: 720px;
+      }
+      .checker-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: var(--surface-color);
+      }
+      .checker-header h3 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+      .checker-close {
+        background: var(--primary-color);
+        color: white;
+        border: none;
+        padding: 6px 16px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        margin-left: 8px;
+      }
+      .checker-action-btn {
+        background: var(--surface-color);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+        padding: 6px 16px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .checker-body {
+        padding: 20px;
+        overflow-y: auto;
+        max-height: 65vh;
+      }
+      .checker-progress {
+        height: 6px;
+        background: var(--border-color);
+        border-radius: 3px;
+        overflow: hidden;
+        margin-bottom: 12px;
+      }
+      .checker-progress-bar {
+        height: 100%;
+        background: var(--primary-color);
+        border-radius: 3px;
+        transition: width 0.3s ease;
+      }
+      .checker-progress-text {
+        text-align: center;
+        font-size: 14px;
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+      }
+      .checker-current {
+        text-align: center;
+        font-size: 13px;
+        color: var(--text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        margin-bottom: 12px;
+      }
+      .checker-stats-mini {
+        display: flex;
+        justify-content: center;
+        gap: 16px;
+        font-size: 13px;
+      }
+      .stat-valid { color: #27ae60; }
+      .stat-invalid { color: #e74c3c; }
+      .stat-error { color: #f39c12; }
+      .stat-unknown { color: var(--text-secondary); }
+      .checker-summary {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .checker-table-wrap {
+        overflow-x: auto;
+      }
+      .checker-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      .checker-table th {
+        background: var(--surface-color);
+        padding: 8px 10px;
+        text-align: left;
+        font-weight: 600;
+        border-bottom: 2px solid var(--border-color);
+        position: sticky;
+        top: 0;
+      }
+      .checker-table td {
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--border-color);
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .checker-td-title { max-width: 150px; }
+      .checker-td-url {
+        max-width: 200px;
+      }
+      .checker-td-url a {
+        color: var(--primary-color);
+        text-decoration: none;
+      }
+      .checker-row-invalid { background: rgba(231,76,60,0.06); }
+      .checker-row-server_error { background: rgba(231,76,60,0.04); }
+      .checker-row-blocked { background: rgba(243,156,18,0.04); }
+      .checker-row-unreachable { background: rgba(243,156,18,0.06); }
+      .checker-row-timeout { background: rgba(243,156,18,0.06); }
+      .checker-row-reachable { background: rgba(52,152,219,0.05); }
+      .checker-empty {
+        text-align: center;
+        color: var(--text-secondary);
+        padding: 30px;
+      }
+      .checker-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+        padding: 8px 12px;
+        background: var(--surface-color);
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+      }
+      .checker-select-all {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 13px;
+        cursor: pointer;
+        margin-right: auto;
+      }
+      .checker-action-danger {
+        color: #e74c3c !important;
+        border-color: #e74c3c !important;
+      }
+      .checker-action-danger:hover {
+        background: rgba(231,76,60,0.1) !important;
+      }
+      .checker-row-cb {
+        cursor: pointer;
+      }
     </style>
 </head>
 <body>
@@ -726,6 +930,7 @@
         <li class="separator"></li>
         <li data-action="update-to-current-url">🔄 更新为当前地址</li>
         <li data-action="clear-usage">🔄 清除使用记录</li>
+        <li data-action="check-validity">🔍 检查有效性</li>
         <li class="separator"></li>
         <li data-action="edit">✏️ 编辑</li>
         <li data-action="delete">🗑️ 删除</li>
@@ -760,6 +965,7 @@
 
   <!-- 引入模块化脚本 -->
   <script src="error-handler.js"></script>
+  <script src="bookmark-checker.js"></script>
   <script src="usage-manager.js"></script>
   <script src="pinyin-search.js"></script>
   <script src="popup.js"></script>

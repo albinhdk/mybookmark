@@ -179,6 +179,11 @@ async function initializeExtension() {
     await renderBookmarks(currentFolderId);
     setupEventListeners();
     
+    // 渲染检查按钮
+    if (typeof bookmarkChecker !== 'undefined') {
+      bookmarkChecker.renderCheckAllButton();
+    }
+    
   } catch (error) {
     console.error('初始化失败:', error);
     const bookmarksContainer = document.getElementById('bookmarks');
@@ -1171,6 +1176,7 @@ function showContextMenu(event, bookmark) {
   const copyNameItem = contextMenu.querySelector('[data-action="copy-name"]');
   const updateToCurrentUrlItem = contextMenu.querySelector('[data-action="update-to-current-url"]');
   const clearUsageItem = contextMenu.querySelector('[data-action="clear-usage"]');
+  const checkValidityItem = contextMenu.querySelector('[data-action="check-validity"]');
   const editItem = contextMenu.querySelector('[data-action="edit"]');
   const deleteItem = contextMenu.querySelector('[data-action="delete"]');
   
@@ -1181,6 +1187,8 @@ function showContextMenu(event, bookmark) {
     copyNameItem.style.display = 'block';
     updateToCurrentUrlItem.style.display = 'block';
     clearUsageItem.style.display = 'block';
+    checkValidityItem.style.display = 'block';
+    checkValidityItem.textContent = '🔍 检查有效性';
     editItem.style.display = 'block';
     deleteItem.style.display = 'block';
   } else {
@@ -1190,6 +1198,8 @@ function showContextMenu(event, bookmark) {
     copyNameItem.style.display = 'block';
     updateToCurrentUrlItem.style.display = 'none';
     clearUsageItem.style.display = 'none';
+    checkValidityItem.style.display = 'block';
+    checkValidityItem.textContent = '🔍 检查文件夹';
     editItem.style.display = 'block';
     deleteItem.style.display = 'block';
   }
@@ -1250,6 +1260,16 @@ function handleContextMenuAction(action, bookmark) {
             renderBookmarks(currentFolderId);
           }
         });
+      }
+      break;
+    case 'check-validity':
+      if (bookmark.url) {
+        bookmarkChecker.checkSingle(bookmark).then(result => {
+          bookmarkChecker.results.set(bookmark.id, { ...result, title: bookmark.title, url: bookmark.url });
+          bookmarkChecker.showResultsDialog();
+        });
+      } else {
+        bookmarkChecker.checkFolderBookmarks(bookmark.id, bookmark.title);
       }
       break;
   }
