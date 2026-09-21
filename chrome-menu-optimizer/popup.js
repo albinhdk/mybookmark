@@ -335,7 +335,7 @@ async function createSearchResultItem(bookmark) {
   }
   
   // 构建工具提示信息
-  let tooltipText = escapeHtml(bookmark.title);
+  let tooltipText = bookmark.title;
   tooltipText += `
 ${bookmark.url}`;
   if (usageCount > 0) {
@@ -344,7 +344,7 @@ ${bookmark.url}`;
   }
   
   listItem.innerHTML = `
-    <a href="${escapeHtml(bookmark.url)}" class="bookmark-link" title="${tooltipText}">
+    <a href="${isDangerousUrl(bookmark.url) ? '#' : escapeHtml(bookmark.url)}" class="bookmark-link" title="${escapeHtml(tooltipText)}">
       <img src="${faviconUrl}" class="favicon" alt="">
       <span class="bookmark-title">${escapeHtml(bookmark.title)}</span>
       ${usageCount > 0 ? `<span class="usage-count">${usageText}</span>` : ''}
@@ -369,6 +369,10 @@ ${bookmark.url}`;
       // 记录使用统计
       bookmarkUsageManager.recordUsage(bookmark.id, bookmark.url, bookmark.title);
       
+      if (isDangerousUrl(bookmark.url)) {
+        alert('该链接协议不受支持，无法打开');
+        return;
+      }
       if (isExtensionEnvironment) {
         // 在扩展环境中，使用Chrome API在后台打开新标签页
         chrome.tabs.create({ url: bookmark.url, active: false });
@@ -604,7 +608,7 @@ function createBookmarkElement(bookmark) {
         }
         
         // 构建工具提示信息
-        let tooltipText = escapeHtml(child.title);
+        let tooltipText = child.title;
         if (usageCount > 0) {
           tooltipText += `\n使用次数: ${usageText}`;
           if (lastUsed) {
@@ -613,7 +617,7 @@ function createBookmarkElement(bookmark) {
         }
         
         nestedItem.innerHTML = `
-          <a href="${child.url}" class="bookmark-link" title="${tooltipText}">
+          <a href="${isDangerousUrl(child.url) ? '#' : escapeHtml(child.url)}" class="bookmark-link" title="${escapeHtml(tooltipText)}">
             <img src="${nestedFaviconUrl}" class="favicon" alt="">
             <span class="bookmark-title">${escapeHtml(child.title)}</span>
             ${usageCount > 0 ? `<span class="usage-count">${usageText}</span>` : ''}
@@ -634,6 +638,10 @@ function createBookmarkElement(bookmark) {
           // 记录使用统计
           bookmarkUsageManager.recordUsage(child.id, child.url, child.title);
           
+          if (isDangerousUrl(child.url)) {
+            alert('该链接协议不受支持，无法打开');
+            return;
+          }
           if (isExtensionEnvironment) {
             // 在扩展环境中，使用Chrome API在后台打开新标签页
             chrome.tabs.create({ url: child.url, active: false });
@@ -757,7 +765,7 @@ function createBookmarkElement(bookmark) {
     }
     
     // 构建工具提示信息
-    let tooltipText = escapeHtml(bookmark.title);
+    let tooltipText = bookmark.title;
     if (usageCount > 0) {
       tooltipText += `\n使用次数: ${usageText}`;
       if (lastUsed) {
@@ -766,11 +774,11 @@ function createBookmarkElement(bookmark) {
     }
     
     listItem.innerHTML = `
-      <a href="${bookmark.url}" class="bookmark-link" title="${escapeHtml(tooltipText)}">
+      <a href="${isDangerousUrl(bookmark.url) ? '#' : escapeHtml(bookmark.url)}" class="bookmark-link" title="${escapeHtml(tooltipText)}">
         <img src="${faviconUrl}" alt="Favicon" class="favicon">
         <div class="bookmark-info">
           <div class="bookmark-title">${escapeHtml(bookmark.title)}</div>
-          ${shouldShowPath ? `<div class="bookmark-path">${folderPathText}</div>` : ''}
+          ${shouldShowPath ? `<div class="bookmark-path">${escapeHtml(folderPathText)}</div>` : ''}
         </div>
         ${usageCount > 0 ? `<span class="usage-count">${usageText}</span>` : ''}
       </a>`
@@ -792,6 +800,10 @@ function createBookmarkElement(bookmark) {
       // 记录使用统计
       bookmarkUsageManager.recordUsage(bookmark.id, bookmark.url, bookmark.title);
       
+      if (isDangerousUrl(bookmark.url)) {
+        alert('该链接协议不受支持，无法打开');
+        return;
+      }
       if (isExtensionEnvironment) {
         // 在扩展环境中，使用Chrome API在后台打开新标签页
         chrome.tabs.create({ url: bookmark.url, active: false });
@@ -1201,6 +1213,7 @@ function handleContextMenuAction(action, bookmark) {
   switch (action) {
     case 'open-in-background':
       if (bookmark.url) {
+        if (isDangerousUrl(bookmark.url)) { alert('该链接协议不受支持，无法打开'); break; }
         chrome.tabs.create({ url: bookmark.url, active: false });
       }
       break;
@@ -1395,9 +1408,24 @@ function updateBookmarkToCurrentUrl(bookmark) {
   }
 }
 
-// HTML转义函数
+// HTML转义函数（同时适用于文本与属性上下文，含引号转义）
 function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  if (text === null || text === undefined) return '';
+  return String(text).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[c]));
+}
+
+// 判断是否为可执行脚本的危险协议（javascript:/data:/vbscript:）
+function isDangerousUrl(url) {
+  try {
+    const protocol = new URL(url).protocol;
+    return protocol === 'javascript:' || protocol === 'data:' || protocol === 'vbscript:';
+  } catch (e) {
+    return false;
+  }
 }
