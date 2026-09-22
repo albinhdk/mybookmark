@@ -48,7 +48,7 @@ Chrome Manifest V3 extension ("Bookmark Viewer") that displays bookmarks in a po
 
 - **README is stale.** It references files that don't exist (`content-script.js`, `styles.css`, `test-framework.js`, `tests.js`, `test-suite.html`, `simple-test.html`). Trust the actual directory listing, not the README.
 - **No TTL cache anymore.** Bookmark freshness comes from `bookmark-tree.js`: change listeners (`onCreated`/`onRemoved`/`onChanged`/`onMoved`/`onChildrenReordered`/`onImportEnded`) plus explicit invalidation after CRUD in `popup.js`.
-- **Popup width is fixed at 720px** (`body { width: 720px }`) and there is deliberately **no viewport-width media query** — since Edge 153's popup autosize measures root scroll width, a `max-width` media query setting `body { width: 100vw }` self-locks the popup at its initial narrow width (fixed 2026-08).
+- **Popup width is fixed at 800px** (the browser's hard cap, `ExtensionPopup::kMaxWidth` in Chromium source). Card width is derived from the view-settings "columns" option via `repeat(N, minmax(0, 1fr))`: 2 columns ≈ 374px, 3 ≈ 245px, 5 ≈ 142px — always filling the row, never overflowing. There is deliberately **no viewport-width media query**: since Edge 153's popup autosize measures root scroll width, a `max-width` media query setting `body { width: 100vw }` self-locks the popup at its initial narrow width (fixed 2026-08).
 - **Bookmark checking runs in the standalone `checker.html` page.** The popup only opens it (via `chrome.tabs.create`), so long checks are not killed when the popup closes.
 - `escapeHtml` escapes `& < > " '` (attribute-context safe); URLs pass through `isDangerousUrl` before opening. Keep both when adding new render paths.
 - The extension targets Chrome 88+ and Chromium-based browsers only.

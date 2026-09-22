@@ -105,6 +105,7 @@ async function initializeExtension() {
 }
 
 // 视图设置（每行列数 / 每卡预览数）：初始化选中值、change 即时保存并重渲
+// popup 整体宽度固定为浏览器上限 800px，卡片宽度由列数经网格 1fr 轨道动态均分。
 function setupViewSettings() {
   const columnsSel = document.getElementById('setting-columns');
   const previewSel = document.getElementById('setting-preview');
@@ -448,7 +449,7 @@ async function renderBookmarks(folderId) {
       return;
     }
 
-    // 创建网格容器（列数由视图设置控制）
+    // 创建网格容器（popup 固定最大宽度，卡片由列数经 1fr 轨道动态均分）
     const gridContainer = document.createElement('ul');
     gridContainer.className = 'bookmark-grid';
     const viewSettings = (typeof bookmarkViewSettings !== 'undefined') ? bookmarkViewSettings.get() : null;

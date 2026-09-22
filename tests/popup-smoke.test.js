@@ -200,21 +200,45 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const menuPos = await evalJs(`return { pos: getComputedStyle(document.getElementById('context-menu')).position };`);
   check('菜单为 fixed 定位', menuPos.pos === 'fixed', menuPos.pos);
 
-  console.log('[I] 视图设置（列数/预览数可配置）');
+  console.log('[I] 视图设置（列数可配置：popup 定宽 800px，卡片动态均分）');
   // 重载页面：恢复原始 mock 树（[F] 替换成了 300 条大数据树）与默认设置，
   // 并回到根目录视图（预览断言需要根视图里的文件夹卡片）
   await send('Page.navigate', { url: POPUP_URL });
   await waitFor(() => evalJs(`return !!document.getElementById('setting-columns') && !!document.querySelector('.bookmark-grid');`), 8000, '视图设置行');
-  const setDefaults = await evalJs(`return { row: !!document.getElementById('view-settings'), columns: document.getElementById('setting-columns').value, preview: document.getElementById('setting-preview').value, hint: document.getElementById('view-settings-hint').textContent };`);
+  const geom = () => evalJs(`
+    const card = document.querySelector('.bookmark-item');
+    const grid = document.querySelector('.bookmark-grid');
+    return {
+      bodyW: document.body.style.width,
+      cssBodyW: getComputedStyle(document.body).width,
+      tracks: getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length,
+      cardW: card ? getComputedStyle(card).width : null,
+      bodyOverflow: document.body.scrollWidth - document.body.clientWidth
+    };
+  `);
+  const setDefaults = await evalJs(`return { row: !!document.getElementById('view-settings'), columns: document.getElementById('setting-columns').value, preview: document.getElementById('setting-preview').value };`);
   check('设置行存在且默认 3 列 / 5 预览', setDefaults.row === true && setDefaults.columns === '3' && setDefaults.preview === '5', JSON.stringify(setDefaults));
-  const gridTracks = (n) => evalJs(`return getComputedStyle(document.querySelector('.bookmark-grid')).gridTemplateColumns.split(' ').filter(Boolean).length;`) ;
-  check('默认网格 3 等分', (await gridTracks()) === 3);
-  // 改列数为 2 → 即时生效
+  const g3 = await geom();
+  check('popup 定宽 800px（浏览器上限），默认 3 列 3 轨道、内容不溢出',
+    g3.cssBodyW === '800px' && g3.tracks === 3 && g3.bodyOverflow <= 0, JSON.stringify(g3));
+  const cardW3 = parseFloat(g3.cardW);
+  // 改列数为 2 → 2 轨道、卡片变宽（动态均分）
   await evalJs(`const s = document.getElementById('setting-columns'); s.value = '2'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
   await sleep(400);
-  check('选 2 列后网格 2 等分', (await gridTracks()) === 2);
-  const hint2 = await evalJs(`return document.getElementById('view-settings-hint').textContent;`);
-  check('提示文案同步更新', hint2.includes('2 列'), hint2);
+  const g2 = await geom();
+  check('选 2 列：2 轨道、卡片动态变宽、宽度仍是 800px、不溢出',
+    g2.tracks === 2 && g2.cssBodyW === '800px' && parseFloat(g2.cardW) > cardW3 && g2.bodyOverflow <= 0, JSON.stringify(g2));
+  // 改列数为 5 → 5 轨道、卡片变窄
+  await evalJs(`const s = document.getElementById('setting-columns'); s.value = '5'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
+  await sleep(400);
+  const g5 = await geom();
+  check('选 5 列：5 轨道、卡片动态变窄、宽度仍是 800px、不溢出',
+    g5.tracks === 5 && g5.cssBodyW === '800px' && parseFloat(g5.cardW) < cardW3 && g5.bodyOverflow <= 0, JSON.stringify(g5));
+  const hint5 = await evalJs(`return document.getElementById('view-settings-hint').textContent;`);
+  check('提示文案反映当前列数', hint5.includes('5 列'), hint5);
+  // 回到 2 列继续后续断言
+  await evalJs(`const s = document.getElementById('setting-columns'); s.value = '2'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
+  await sleep(400);
   // 预览改为 0 → 嵌套预览消失
   await evalJs(`const s = document.getElementById('setting-preview'); s.value = '0'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
   await sleep(500);
