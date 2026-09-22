@@ -199,6 +199,9 @@ function setupEventListeners() {
   // 书签容器事件委托（点击/右键/favicon 兜底统一处理，监听器数量 O(1)）
   setupBookmarksDelegation();
   
+  // 拖拽移动（委托在 #bookmarks 容器 + 面包屑）
+  setupDragAndDrop();
+  
   // 右键菜单
   setupContextMenu();
   
@@ -288,6 +291,232 @@ function setupBookmarksDelegation() {
       img.src = FALLBACK_FAVICON;
     }
   }, true);
+}
+
+// ===== 拖拽移动（HTML5 Drag & Drop）=====
+// 交互：书签/文件夹卡片均可拖动 —— 拖到文件夹卡片上=移入该文件夹；
+// 在当前网格内拖动=排序；面包屑目录项也是放置目标（拖到哪层就移到哪层）。
+// 事件全部冒泡，统一委托在 #bookmarks 容器上，监听器 O(1)。
+// 卡片内 <a> 会隐式成为拖拽源，dragstart 的 target 可能是链接本身，
+// 因此一律用 e.target.closest('.bookmark-item') 定位卡片。
+let dndState = null; // { id, isFolder, fromFolderId, fromIndex, insertTarget?, folderDropId?, crumbDropId? }
+
+// 同父排序的 index 归一化。chrome.bookmarks.move 的 index 以"移除前"数组为基准，
+// 向下移动时 Chromium 自动 -1（tests/dnd-semantics.js 于 Edge 153 实证：move(A,2)
+// 于 [A,B,C,D] 得 BACD），故视觉落点（移除后坐标）向下时需 +1 回补；
+// 向上移动与跨父移动直接传落点即可。
+function normalizeMoveIndex(fromIndex, dropIndex, sameParent) {
+  if (sameParent && dropIndex > fromIndex) return dropIndex + 1;
+  return dropIndex;
+}
+
+// 视觉插入位置 → 移除后坐标系的落点：悬停卡在原列表中的 cardIndex，
+// 其被拖项移除后的位置为 cardIndex - (fromIndex < cardIndex ? 1 : 0)。
+// position 为 'before'/'after'（after 场景由调用方以"最后一张卡之后"传入）。
+function computeDropIndex(fromIndex, cardIndex, position) {
+  const cardPos = cardIndex - (fromIndex < cardIndex ? 1 : 0);
+  return position === 'after' ? cardPos + 1 : cardPos;
+}
+
+// 网格直接子卡片（不含末尾的"加载更多"假项；顺序即当前文件夹子项顺序，
+// load-more 挂起时列表不完整，此时禁用排序——见 setupDragAndDrop 的 pendingLoadMore 门控）
+function getGridCards(grid) {
+  return Array.from(grid.children).filter(li =>
+    li.classList.contains('bookmark-item') && !li.classList.contains('load-more-item')
+  );
+}
+
+// 指针所在网格内的插入位置：取最近的可放置卡片（跳过被拖项），
+// 以卡片水平中线判定落在其前还是后（多列网格的列间空隙由最近卡片兜底）
+function resolveGridInsertTarget(grid, clientX, clientY, excludeCard) {
+  const cards = getGridCards(grid).filter(card => card !== excludeCard);
+  if (cards.length === 0) return null;
+  let best = null, bestDist = Infinity;
+  for (const card of cards) {
+    const r = card.getBoundingClientRect();
+    const dx = clientX < r.left ? r.left - clientX : (clientX > r.right ? clientX - r.right : 0);
+    const dy = clientY < r.top ? r.top - clientY : (clientY > r.bottom ? clientY - r.bottom : 0);
+    if (dx === 0 && dy === 0) { best = card; break; } // 指针就在卡内
+    const dist = dx * dx + dy * dy;
+    if (dist < bestDist) { bestDist = dist; best = card; }
+  }
+  const r = best.getBoundingClientRect();
+  return { card: best, position: clientX > r.left + r.width / 2 ? 'after' : 'before' };
+}
+
+function setupDragAndDrop() {
+  const container = document.getElementById('bookmarks');
+  const breadcrumb = document.getElementById('breadcrumb');
+  if (!container || container.dataset.dndBound) return;
+  container.dataset.dndBound = '1';
+
+  // 只清除放置反馈高亮；拖拽源的 .dnd-dragging 置灰保留到 dragend/drop
+  const clearDropVisuals = () => {
+    container.querySelectorAll('.dnd-drop-into, .dnd-drop-before, .dnd-drop-after, .dnd-drop-invalid')
+      .forEach(el => el.classList.remove('dnd-drop-into', 'dnd-drop-before', 'dnd-drop-after', 'dnd-drop-invalid'));
+    if (breadcrumb) {
+      breadcrumb.querySelectorAll('.dnd-crumb-drop').forEach(el => el.classList.remove('dnd-crumb-drop'));
+    }
+  };
+
+  const resetDnD = () => {
+    clearDropVisuals();
+    container.querySelectorAll('.dnd-dragging').forEach(el => el.classList.remove('dnd-dragging'));
+    dndState = null;
+  };
+
+  // dragstart：记录被拖项与其原始位置（先算 fromIndex 再置灰，
+  // 避免 dragging 卡片被过滤导致索引坐标系不一致）
+  container.addEventListener('dragstart', function(e) {
+    const card = e.target.closest('.bookmark-item');
+    if (!card) return;
+    const bookmark = currentRenderData.get(card.dataset.bookmarkId);
+    if (!bookmark) return;
+    const grid = card.closest('.bookmark-grid');
+    dndState = {
+      id: bookmark.id,
+      isFolder: !bookmark.url,
+      fromFolderId: currentFolderId,
+      fromIndex: grid ? getGridCards(grid).indexOf(card) : -1
+    };
+    e.dataTransfer.setData('text/plain', bookmark.title || '');
+    e.dataTransfer.effectAllowed = 'move';
+    card.classList.add('dnd-dragging');
+  });
+
+  // dragover：文件夹卡片=移入高亮（校验自身/子树）；其他位置=排序插入指示
+  container.addEventListener('dragover', function(e) {
+    if (!dndState) return;
+    e.preventDefault(); // 不阻止默认则 drop 不触发
+    clearDropVisuals();
+
+    const folderCard = e.target.closest('.folder-item');
+    if (folderCard) {
+      const targetId = folderCard.dataset.bookmarkId;
+      if (targetId !== dndState.id) {
+        const invalid = dndState.isFolder && BMV.bookmarkTree.isSelfOrAncestorOf(dndState.id, targetId);
+        folderCard.classList.add(invalid ? 'dnd-drop-invalid' : 'dnd-drop-into');
+        e.dataTransfer.dropEffect = invalid ? 'none' : 'move';
+      } else {
+        e.dataTransfer.dropEffect = 'none'; // 拖到自己头上：无放置反馈
+      }
+      return;
+    }
+
+    // 排序：pendingLoadMore 挂起时只渲染了部分子项，index 会错位，禁用
+    const grid = container.querySelector('.bookmark-grid');
+    if (grid && !pendingLoadMore) {
+      const target = resolveGridInsertTarget(grid, e.clientX, e.clientY, container.querySelector('.dnd-dragging'));
+      if (target) {
+        target.card.classList.add(target.position === 'after' ? 'dnd-drop-after' : 'dnd-drop-before');
+        dndState.insertTarget = { bookmarkId: target.card.dataset.bookmarkId, position: target.position };
+        e.dataTransfer.dropEffect = 'move';
+        return;
+      }
+    }
+    e.dataTransfer.dropEffect = 'none';
+  });
+
+  container.addEventListener('drop', function(e) {
+    if (!dndState) return;
+    e.preventDefault();
+    const state = dndState;
+    const folderCard = e.target.closest('.folder-item');
+    const folderTargetId = folderCard && folderCard.dataset.bookmarkId;
+
+    // 1) 拖入文件夹（同一张卡上 dragover 已高亮，这里按同一规则复核）
+    if (folderTargetId && folderTargetId !== state.id) {
+      const invalid = state.isFolder && BMV.bookmarkTree.isSelfOrAncestorOf(state.id, folderTargetId);
+      resetDnD();
+      if (invalid) {
+        alert('不能将文件夹移动到它自己或它的子文件夹中');
+        return;
+      }
+      moveBookmarkTo(state.id, { parentId: folderTargetId });
+      return;
+    }
+
+    // 2) 网格内排序（fromIndex/插入目标都在"移除前"坐标系，与 drop 时 DOM 一致）
+    const insert = state.insertTarget;
+    const grid = container.querySelector('.bookmark-grid');
+    if (insert && grid && !pendingLoadMore && state.fromIndex >= 0) {
+      const cardIndex = getGridCards(grid).findIndex(li => li.dataset.bookmarkId === insert.bookmarkId);
+      if (cardIndex !== -1) {
+        const dropIndex = computeDropIndex(state.fromIndex, cardIndex, insert.position);
+        resetDnD();
+        if (dropIndex !== state.fromIndex) {
+          moveBookmarkTo(state.id, { index: normalizeMoveIndex(state.fromIndex, dropIndex, true) });
+        }
+        return;
+      }
+    }
+    resetDnD();
+  });
+
+  // 无论放置是否有效、按 Esc 取消还是拖出窗口，dragend 都会触发，统一收尾
+  container.addEventListener('dragend', resetDnD);
+
+  // 面包屑放置目标：拖到哪层目录项就移到哪层
+  if (breadcrumb) {
+    breadcrumb.addEventListener('dragover', function(e) {
+      if (!dndState) return;
+      e.preventDefault();
+      clearDropVisuals();
+      const link = e.target.closest('a[data-folder-id]');
+      if (!link) { e.dataTransfer.dropEffect = 'none'; return; }
+      const targetId = link.dataset.folderId;
+      // 自身/子树、原地放下都视为无效
+      const invalid = targetId === dndState.id
+        || (dndState.isFolder && BMV.bookmarkTree.isSelfOrAncestorOf(dndState.id, targetId))
+        || targetId === dndState.fromFolderId;
+      if (invalid) { e.dataTransfer.dropEffect = 'none'; return; }
+      link.classList.add('dnd-crumb-drop');
+      e.dataTransfer.dropEffect = 'move';
+    });
+
+    breadcrumb.addEventListener('drop', function(e) {
+      if (!dndState) return;
+      e.preventDefault();
+      const state = dndState;
+      const link = e.target.closest('a[data-folder-id]');
+      const targetId = link && link.dataset.folderId;
+      resetDnD();
+      if (!targetId || targetId === state.fromFolderId || targetId === state.id) return;
+      if (state.isFolder && BMV.bookmarkTree.isSelfOrAncestorOf(state.id, targetId)) {
+        alert('不能将文件夹移动到它自己或它的子文件夹中');
+        return;
+      }
+      moveBookmarkTo(state.id, { parentId: targetId });
+    });
+
+    // 指针离开面包屑时清掉残留高亮（relatedTarget 为空表示拖出了窗口）
+    breadcrumb.addEventListener('dragleave', function(e) {
+      if (!dndState) return;
+      if (!breadcrumb.contains(e.relatedTarget)) {
+        breadcrumb.querySelectorAll('.dnd-crumb-drop').forEach(el => el.classList.remove('dnd-crumb-drop'));
+      }
+    });
+  }
+}
+
+// 移动书签/文件夹：chrome.bookmarks.move → 失效内存树 → 重渲当前视图
+async function moveBookmarkTo(id, destination) {
+  try {
+    await new Promise((resolve, reject) => {
+      chrome.bookmarks.move(id, destination, function() {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve();
+        }
+      });
+    });
+    BMV.bookmarkTree.invalidateBookmarkTree(); // 内存树失效，下次读取自动重建
+    await renderBookmarks(currentFolderId);
+  } catch (error) {
+    console.error('移动书签失败:', error);
+    alert('移动失败: ' + error.message);
+  }
 }
 
 // 渲染搜索结果（竞态防护 + 分批渲染）
@@ -546,6 +775,7 @@ async function updateBreadcrumb(folderId) {
       const link = document.createElement('a');
       link.href = '#';
       link.textContent = item.title;
+      link.dataset.folderId = item.id; // 拖拽放置目标（见 setupDragAndDrop）
       link.addEventListener('click', async function(e) {
         e.preventDefault();
         try {
@@ -569,6 +799,7 @@ async function updateBreadcrumb(folderId) {
 function createBookmarkElement(bookmark) {
   const listItem = document.createElement('li');
   listItem.dataset.bookmarkId = bookmark.id;
+  listItem.draggable = true; // 拖拽移动（事件委托见 setupDragAndDrop）
   currentRenderData.set(bookmark.id, bookmark);
   
   if (!bookmark.url) { // 文件夹没有URL属性

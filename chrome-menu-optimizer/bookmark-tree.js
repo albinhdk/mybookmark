@@ -149,6 +149,23 @@
     }
   }
 
+  // 判断 ancestorId 是否为 nodeId 自身或其祖先（拖拽循环校验：
+  // 禁止把文件夹移入自己或自己的子树，否则 chrome.bookmarks.move 会报错）。
+  // 同步读取内存树索引——popup 渲染前已 ensureBookmarkTree，dragover/drop 高频路径
+  // 不能等异步；索引未就绪（理论上不会发生）时返回 false，由 move 失败兜底。
+  function isSelfOrAncestorOf(ancestorId, nodeId) {
+    if (!ancestorId || !nodeId) return false;
+    if (ancestorId === nodeId) return true;
+    const index = treeIndex;
+    if (!index) return false;
+    let current = index.nodeById.get(nodeId);
+    while (current && current.parentId != null) {
+      if (current.parentId === ancestorId) return true;
+      current = index.nodeById.get(current.parentId);
+    }
+    return false;
+  }
+
   BMV.bookmarkTree = {
     buildTreeIndex,
     ensureBookmarkTree,
@@ -158,6 +175,7 @@
     getAllBookmarks,
     getBookmarks,
     buildBreadcrumbPath,
-    getFolderPath
+    getFolderPath,
+    isSelfOrAncestorOf
   };
 })();

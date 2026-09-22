@@ -367,6 +367,55 @@
         transform: translateX(2px);
       }
 
+      /* ===== 拖拽移动 ===== */
+      .bookmark-item {
+        cursor: grab;
+      }
+
+      /* 被拖项置灰（保留布局，避免拖动过程中网格重排导致插入指示跳动） */
+      .bookmark-item.dnd-dragging {
+        opacity: 0.4;
+        cursor: grabbing;
+      }
+
+      /* 放置高亮：整卡描边 = 拖入该文件夹 */
+      .bookmark-item.dnd-drop-into {
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 2px var(--primary-color);
+      }
+
+      /* 非法放置（文件夹拖入自身/子树） */
+      .bookmark-item.dnd-drop-invalid {
+        border-color: #ff6b6b;
+      }
+
+      /* 排序插入指示：悬停卡左/右缘的色条 */
+      .bookmark-item.dnd-drop-before::after,
+      .bookmark-item.dnd-drop-after::after {
+        content: '';
+        position: absolute;
+        top: 4px;
+        bottom: 4px;
+        width: 3px;
+        background: var(--primary-color);
+        border-radius: 2px;
+        pointer-events: none;
+      }
+
+      .bookmark-item.dnd-drop-before::after {
+        left: 0;
+      }
+
+      .bookmark-item.dnd-drop-after::after {
+        right: 0;
+      }
+
+      /* 面包屑放置高亮 */
+      #breadcrumb a.dnd-crumb-drop {
+        background: rgba(26, 115, 232, 0.18);
+        border-radius: 4px;
+      }
+
       /* 统计信息 */
       .stats {
         padding: 16px 20px;
