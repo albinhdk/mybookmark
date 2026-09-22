@@ -6,7 +6,8 @@
   "permissions": [
     "bookmarks",
     "activeTab",
-    "storage"
+    "storage",
+    "favicon"
   ],
   "host_permissions": [
     "http://*/*",
