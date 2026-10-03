@@ -1,3 +1,5 @@
+var t = (typeof window !== 'undefined' && window.BMV && window.BMV.i18n) ? window.BMV.i18n.t : function (key) { return key; };
+
 // 书签使用统计管理器
 class BookmarkUsageManager {
   constructor() {
@@ -156,10 +158,10 @@ class BookmarkUsageManager {
   // 格式化使用次数显示
   formatUsageCount(count) {
     if (count === 0) return '';
-    if (count === 1) return '1次';
-    if (count < 100) return `${count}次`;
-    if (count < 1000) return `${count}次`;
-    return `${(count / 1000).toFixed(1)}k次`;
+    if (count === 1) return t('usageCountSingular');
+    if (count < 100) return t('usageCountFormat', [count]);
+    if (count < 1000) return t('usageCountFormat', [count]);
+    return t('usageCountKFormat', [(count / 1000).toFixed(1)]);
   }
 
   // 格式化最后使用时间
@@ -172,13 +174,13 @@ class BookmarkUsageManager {
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
     
-    if (minutes < 1) return '刚刚';
-    if (minutes < 60) return `${minutes}分钟前`;
-    if (hours < 24) return `${hours}小时前`;
-    if (days < 7) return `${days}天前`;
-    if (days < 30) return `${Math.floor(days / 7)}周前`;
-    if (days < 365) return `${Math.floor(days / 30)}个月前`;
-    return `${Math.floor(days / 365)}年前`;
+    if (minutes < 1) return t('lastUsedJustNow');
+    if (minutes < 60) return t('lastUsedMinutesAgo', [minutes]);
+    if (hours < 24) return t('lastUsedHoursAgo', [hours]);
+    if (days < 7) return t('lastUsedDaysAgo', [days]);
+    if (days < 30) return t('lastUsedWeeksAgo', [Math.floor(days / 7)]);
+    if (days < 365) return t('lastUsedMonthsAgo', [Math.floor(days / 30)]);
+    return t('lastUsedYearsAgo', [Math.floor(days / 365)]);
   }
 }
 

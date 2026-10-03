@@ -7,6 +7,7 @@ const path = require('path');
 const DIR = path.join(__dirname, '..', 'chrome-menu-optimizer');
 const CHECKER_FILE = path.join(DIR, 'bookmark-checker.js');
 const TREE_FILE = path.join(DIR, 'bookmark-tree.js');
+const I18N_FILE = path.join(DIR, 'i18n.js');
 
 // 默认书签树（测试可通过 sandbox.__tree 覆盖）
 const DEFAULT_TREE = [{
@@ -82,6 +83,7 @@ function makeSandbox(responder) {
   });
   sandbox.window = sandbox;
   vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(I18N_FILE, 'utf8'), sandbox); // i18n 助手先于模块加载
   vm.runInContext(fs.readFileSync(TREE_FILE, 'utf8'), sandbox);
   vm.runInContext(fs.readFileSync(CHECKER_FILE, 'utf8'), sandbox);
   const checker = sandbox.bookmarkChecker;

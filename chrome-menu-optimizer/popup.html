@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Chrome书签优化器</title>
+  <title data-i18n="documentTitle">Chrome书签优化器</title>
   <meta charset="UTF-8">
   <style>
       :root {
@@ -807,58 +807,58 @@
 <body>
   <div class="container">
     <div class="header">
-      <h1>书签优化器</h1>
+      <h1 data-i18n="appTitle">书签优化器</h1>
       <div class="search-container">
         <div class="search-icon">🔍</div>
-        <input type="search" id="search-box" placeholder="快速搜索书签...">
+        <input type="search" id="search-box" placeholder="快速搜索书签..." data-i18n-placeholder="searchPlaceholder">
       </div>
     </div>
     
     <div id="breadcrumb"></div>
 
     <div id="view-settings">
-      <label>每行
+      <label><span data-i18n="labelPerRow">每行</span>
         <select id="setting-columns">
           <option value="2">2</option>
           <option value="3">3</option>
           <option value="4">4</option>
           <option value="5">5</option>
         </select>
-        列
+        <span data-i18n="labelColumns">列</span>
       </label>
-      <label>每卡预览
+      <label><span data-i18n="labelPreviewPerCard">每卡预览</span>
         <select id="setting-preview">
-          <option value="0">不显示</option>
+          <option value="0" data-i18n="previewOptionNone">不显示</option>
           <option value="3">3</option>
           <option value="5">5</option>
           <option value="8">8</option>
           <option value="10">10</option>
         </select>
-        项
+        <span data-i18n="labelItems">项</span>
       </label>
       <span id="view-settings-hint"></span>
     </div>
     
     <div id="bookmarks">
-      <div class="loading">正在加载书签</div>
+      <div class="loading" data-i18n="loadingBookmarks">正在加载书签</div>
     </div>
 
     <div class="stats" id="stats">
-      <span id="bookmark-count">0</span> 个书签 | <span id="folder-count">0</span> 个文件夹
+      <span id="bookmark-count">0</span><span data-i18n="statsBookmarks"> 个书签</span> | <span id="folder-count">0</span><span data-i18n="statsFolders"> 个文件夹</span>
     </div>
 
     <div id="context-menu" class="context-menu">
       <ul>
-        <li data-action="open-in-background">🔗 后台打开</li>
-        <li data-action="copy-url">📋 复制链接</li>
-        <li data-action="copy-name">📝 复制名称</li>
+        <li data-action="open-in-background" data-i18n="menuOpenInBackground">🔗 后台打开</li>
+        <li data-action="copy-url" data-i18n="menuCopyUrl">📋 复制链接</li>
+        <li data-action="copy-name" data-i18n="menuCopyName">📝 复制名称</li>
         <li class="separator"></li>
-        <li data-action="update-to-current-url">🔄 更新为当前地址</li>
-        <li data-action="clear-usage">🔄 清除使用记录</li>
-        <li data-action="check-validity">🔍 检查有效性</li>
+        <li data-action="update-to-current-url" data-i18n="menuUpdateToCurrentUrl">🔄 更新为当前地址</li>
+        <li data-action="clear-usage" data-i18n="menuClearUsage">🔄 清除使用记录</li>
+        <li data-action="check-validity" data-i18n="menuCheckValidity">🔍 检查有效性</li>
         <li class="separator"></li>
-        <li data-action="edit">✏️ 编辑</li>
-        <li data-action="delete">🗑️ 删除</li>
+        <li data-action="edit" data-i18n="menuEdit">✏️ 编辑</li>
+        <li data-action="delete" data-i18n="menuDelete">🗑️ 删除</li>
       </ul>
     </div>
 
@@ -867,22 +867,22 @@
       <div class="edit-dialog-overlay"></div>
       <div class="edit-dialog-content">
         <div class="edit-dialog-header">
-          <h3>编辑书签</h3>
+          <h3 data-i18n="editDialogTitle">编辑书签</h3>
           <button class="edit-dialog-close" id="edit-dialog-close">×</button>
         </div>
         <div class="edit-dialog-body">
           <div class="form-group">
-            <label for="edit-title">名称</label>
-            <input type="text" id="edit-title" placeholder="请输入书签名称">
+            <label for="edit-title" data-i18n="editLabelName">名称</label>
+            <input type="text" id="edit-title" placeholder="请输入书签名称" data-i18n-placeholder="editPlaceholderName">
           </div>
           <div class="form-group" id="edit-url-group">
-            <label for="edit-url">网址</label>
-            <input type="url" id="edit-url" placeholder="请输入网址">
+            <label for="edit-url" data-i18n="editLabelUrl">网址</label>
+            <input type="url" id="edit-url" placeholder="请输入网址" data-i18n-placeholder="editPlaceholderUrl">
           </div>
         </div>
         <div class="edit-dialog-footer">
-          <button class="btn btn-secondary" id="edit-cancel">取消</button>
-          <button class="btn btn-primary" id="edit-save">保存</button>
+          <button class="btn btn-secondary" id="edit-cancel" data-i18n="btnCancel">取消</button>
+          <button class="btn btn-primary" id="edit-save" data-i18n="btnSave">保存</button>
         </div>
       </div>
     </div>
@@ -890,6 +890,7 @@
 
   <!-- 引入模块化脚本（mock-chrome-api 仅在 file:// 直开的测试环境生效） -->
   <script src="mock-chrome-api.js"></script>
+  <script src="i18n.js"></script>
   <script src="error-handler.js"></script>
   <script src="bookmark-tree.js"></script>
   <script src="bookmark-checker.js"></script>

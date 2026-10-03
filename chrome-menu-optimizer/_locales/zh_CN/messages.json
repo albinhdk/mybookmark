@@ -1,0 +1,10 @@
+{
+  "extensionName": {
+    "message": "Bookmark Viewer",
+    "description": "扩展名称（品牌名，各语言保持一致）"
+  },
+  "extensionDescription": {
+    "message": "点击图标即可在一个弹出窗口中查看您的所有书签。",
+    "description": "商店短描述（中文）"
+  }
+}

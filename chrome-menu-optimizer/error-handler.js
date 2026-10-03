@@ -1,3 +1,5 @@
+var t = (typeof window !== 'undefined' && window.BMV && window.BMV.i18n) ? window.BMV.i18n.t : function (key) { return key; };
+
 /**
  * 错误处理和日志记录模块
  * 提供统一的错误处理、日志记录和用户反馈机制
@@ -50,7 +52,7 @@ class ErrorHandler {
    * @param {Error} error - 错误对象
    */
   handleChromeApiError(operation, error) {
-    const errorMessage = chrome.runtime.lastError?.message || error?.message || '未知错误';
+    const errorMessage = chrome.runtime.lastError?.message || error?.message || t('unknownError');
     this.log('error', `Chrome API错误 - ${operation}`, {
       error: errorMessage,
       operation,
@@ -70,7 +72,7 @@ class ErrorHandler {
    * @param {Error} error - 错误对象
    */
   handleNetworkError(url, error) {
-    this.log('error', `网络请求失败`, {
+    this.log('error', t('errorNetworkFailed'), {
       url,
       error: error.message,
       stack: error.stack
@@ -78,7 +80,7 @@ class ErrorHandler {
     
     return {
       success: false,
-      error: '网络请求失败',
+      error: t('errorNetworkFailed'),
       url
     };
   }
@@ -103,7 +105,7 @@ class ErrorHandler {
     if (showRetry) {
       const retryButton = document.createElement('button');
       retryButton.className = 'retry-btn';
-      retryButton.textContent = '重试';
+      retryButton.textContent = t('retryButton');
       retryButton.addEventListener('click', () => location.reload());
       const messageBox = container.querySelector('.error-message');
       if (messageBox) {

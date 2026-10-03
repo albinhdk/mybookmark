@@ -1,0 +1,10 @@
+{
+  "extensionName": {
+    "message": "Bookmark Viewer",
+    "description": "Extension name (brand name, kept identical across locales)"
+  },
+  "extensionDescription": {
+    "message": "Click the toolbar icon to view all your bookmarks in a popup grid.",
+    "description": "Store short description (English)"
+  }
+}

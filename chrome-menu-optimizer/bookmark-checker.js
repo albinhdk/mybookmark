@@ -1,6 +1,9 @@
 // 书签有效性检查模块
 // 通过 background service worker 发起请求，利用 host_permissions 绕过 CORS，获取真实 HTTP 状态码
 
+// 国际化取词（i18n.js 必须先于本文件加载；缺失时退化为直接返回 key）
+var t = (typeof window !== 'undefined' && window.BMV && window.BMV.i18n) ? window.BMV.i18n.t : function (key) { return key; };
+
 const BookmarkChecker = {
   results: new Map(),
   isRunning: false,
@@ -20,7 +23,7 @@ const BookmarkChecker = {
             if (chrome.runtime.lastError) {
               resolve({ ok: false, error: chrome.runtime.lastError.message });
             } else {
-              resolve(response || { ok: false, error: '无响应' });
+              resolve(response || { ok: false, error: t('statusNoResponse') });
             }
           });
         });
@@ -35,7 +38,7 @@ const BookmarkChecker = {
         return this._classifyResult({ ok: true, status: 0, opaque: true });
       } catch (fetchError) {
         clearTimeout(timeoutId);
-        if (fetchError.name === 'AbortError') return { status: 'timeout', code: '超时' };
+        if (fetchError.name === 'AbortError') return { status: 'timeout', code: t('statusTimeout') };
         return { status: 'unreachable', code: fetchError.message };
       }
     } catch (error) {
@@ -47,7 +50,7 @@ const BookmarkChecker = {
     if (result.ok) {
       const code = result.status;
       // no-cors 兜底的 opaque 响应（status 0）只能证明服务器可达，不能证明页面有效
-      if (result.opaque || code === 0) return { status: 'reachable', code: '可达(未验证)' };
+      if (result.opaque || code === 0) return { status: 'reachable', code: t('statusReachableUnverified') };
       if (code >= 200 && code < 400) return { status: 'valid', code };
       if (code === 404 || code === 410) return { status: 'invalid', code };
       // 403/401 等需登录或被反爬，不等于死链，单独分类避免误删
@@ -55,7 +58,7 @@ const BookmarkChecker = {
       if (code >= 500) return { status: 'server_error', code };
       return { status: 'valid', code };
     } else {
-      if (result.error === 'timeout') return { status: 'timeout', code: '超时' };
+      if (result.error === 'timeout') return { status: 'timeout', code: t('statusTimeout') };
       return { status: 'unreachable', code: result.error };
     }
   },
@@ -119,7 +122,7 @@ const BookmarkChecker = {
     const btn = document.createElement('button');
     btn.id = 'btn-check-all';
     btn.className = 'check-all-btn';
-    btn.textContent = '检查书签';
+    btn.textContent = t('checkBookmarksBtn');
     btn.addEventListener('click', () => this.openCheckerPage());
     header.appendChild(btn);
   },
@@ -141,7 +144,7 @@ const BookmarkChecker = {
     // 批次令牌：取消后立即重开时，旧批次的 finally 不会复位新批次的状态
     const token = ++this._runToken;
     try {
-      if (!bookmarks || bookmarks.length === 0) { alert(emptyMessage || '没有可检查的书签'); return; }
+      if (!bookmarks || bookmarks.length === 0) { alert(emptyMessage || t('noBookmarksToCheck')); return; }
       this.clearResults();
       this.showProgressDialog(bookmarks.length);
       const outcome = await this.checkBatch(bookmarks, (completed, total, bookmark, result) => {
@@ -156,12 +159,12 @@ const BookmarkChecker = {
 
   async checkAllBookmarks() {
     const allBookmarks = await BMV.bookmarkTree.getAllBookmarks();
-    await this._runCheck(allBookmarks.filter(b => b.url), '没有可检查的书签');
+    await this._runCheck(allBookmarks.filter(b => b.url), t('noBookmarksToCheck'));
   },
 
   async checkFolderBookmarks(folderId, folderName) {
     const children = await this.getFolderBookmarksRecursive(folderId);
-    await this._runCheck(children, '该文件夹没有可检查的书签');
+    await this._runCheck(children, t('folderNoBookmarksToCheck'));
   },
 
   async getFolderBookmarksRecursive(folderId) {
@@ -189,14 +192,14 @@ const BookmarkChecker = {
     dialog.innerHTML = `<div class="checker-overlay"></div>
       <div class="checker-content">
         <div class="checker-header">
-          <h3>正在检查书签有效性</h3>
-          <button class="checker-close" id="checker-cancel-btn">取消</button>
+          <h3>${t('checkerProgressTitle')}</h3>
+          <button class="checker-close" id="checker-cancel-btn">${t('btnCancel')}</button>
         </div>
         <div class="checker-body">
           <div class="checker-progress">
             <div class="checker-progress-bar" id="checker-progress-bar" style="width: 0%"></div>
           </div>
-          <div class="checker-progress-text" id="checker-progress-text">准备中...</div>
+          <div class="checker-progress-text" id="checker-progress-text">${t('checkerPreparing')}</div>
           <div class="checker-current" id="checker-current"></div>
           <div class="checker-stats-mini" id="checker-stats-mini"></div>
         </div>
@@ -223,16 +226,16 @@ const BookmarkChecker = {
     const current = document.getElementById('checker-current');
     const mini = document.getElementById('checker-stats-mini');
     if (bar) bar.style.width = pct + '%';
-    if (text) text.textContent = `${completed} / ${total} (${pct}%)`;
+    if (text) text.textContent = t('checkerProgressText', [completed, total, pct]);
     if (current) {
       const icon = result ? this.getStatusIcon(result.status) : '';
-      current.innerHTML = `${icon} ${this.escapeHtml(bookmark.title)}`;
+      current.innerHTML = t('checkerCurrentItem', [icon, this.escapeHtml(bookmark.title)]);
     }
     if (mini) {
       const s = this.getStats();
-      mini.innerHTML = `<span class="stat-valid">✓ ${s.valid}</span>
-        <span class="stat-invalid">✗ ${s.invalid}</span>
-        <span class="stat-error">⚠ ${s.blocked + s.server_error + s.unreachable + s.timeout + s.reachable}</span>`;
+      mini.innerHTML = `<span class="stat-valid">${t('checkerStatValid', [s.valid])}</span>
+        <span class="stat-invalid">${t('checkerStatInvalid', [s.invalid])}</span>
+        <span class="stat-error">${t('checkerStatProblemTotal', [s.blocked + s.server_error + s.unreachable + s.timeout + s.reachable])}</span>`;
     }
   },
 
@@ -246,7 +249,7 @@ const BookmarkChecker = {
 
     let bodyHTML;
     if (stats.total === 0) {
-      bodyHTML = '<div class="checker-empty">没有检查结果</div>';
+      bodyHTML = '<div class="checker-empty">' + t('checkerNoResults') + '</div>';
     } else {
       const sorted = Array.from(this.results.entries()).sort((a, b) => {
         const order = { invalid: 0, blocked: 1, server_error: 2, unreachable: 3, timeout: 4, reachable: 5, valid: 6 };
@@ -254,24 +257,24 @@ const BookmarkChecker = {
       });
       const problemCount = stats.total - stats.valid;
       bodyHTML = `<div class="checker-summary">
-        <span class="stat-valid">✓ 有效: ${stats.valid}</span>
-        <span class="stat-invalid">✗ 无效(404/410): ${stats.invalid}</span>
-        ${stats.blocked > 0 ? `<span class="stat-error">🚫 需登录/被拦截: ${stats.blocked}</span>` : ''}
-        ${stats.server_error > 0 ? `<span class="stat-error">🔴 服务器错误: ${stats.server_error}</span>` : ''}
-        ${stats.unreachable > 0 ? `<span class="stat-error">🌐 无法访问: ${stats.unreachable}</span>` : ''}
-        ${stats.timeout > 0 ? `<span class="stat-error">⏱ 超时: ${stats.timeout}</span>` : ''}
-        ${stats.reachable > 0 ? `<span class="stat-error">❓ 可达未验证: ${stats.reachable}</span>` : ''}
+        <span class="stat-valid">${t('checkerSummaryValid', [stats.valid])}</span>
+        <span class="stat-invalid">${t('checkerSummaryInvalid', [stats.invalid])}</span>
+        ${stats.blocked > 0 ? `<span class="stat-error">${t('checkerSummaryBlocked', [stats.blocked])}</span>` : ''}
+        ${stats.server_error > 0 ? `<span class="stat-error">${t('checkerSummaryServerError', [stats.server_error])}</span>` : ''}
+        ${stats.unreachable > 0 ? `<span class="stat-error">${t('checkerSummaryUnreachable', [stats.unreachable])}</span>` : ''}
+        ${stats.timeout > 0 ? `<span class="stat-error">${t('checkerSummaryTimeout', [stats.timeout])}</span>` : ''}
+        ${stats.reachable > 0 ? `<span class="stat-error">${t('checkerSummaryReachable', [stats.reachable])}</span>` : ''}
       </div>
       ${problemCount > 0 ? `<div class="checker-actions">
-        <label class="checker-select-all"><input type="checkbox" id="checker-select-all"> 全选无效项</label>
-        <button class="checker-action-btn" id="checker-open-selected" title="在后台打开选中项">📂 后台打开</button>
-        <button class="checker-action-btn" id="checker-copy-selected" title="复制选中项的URL">📋 复制链接</button>
-        <button class="checker-action-btn checker-action-danger" id="checker-delete-selected" title="删除选中的书签">🗑️ 删除</button>
+        <label class="checker-select-all"><input type="checkbox" id="checker-select-all"> ${t('checkerSelectAllInvalid')}</label>
+        <button class="checker-action-btn" id="checker-open-selected" title="${t('checkerOpenSelectedTitle')}">${t('checkerOpenSelectedBtn')}</button>
+        <button class="checker-action-btn" id="checker-copy-selected" title="${t('checkerCopySelectedTitle')}">${t('checkerCopySelectedBtn')}</button>
+        <button class="checker-action-btn checker-action-danger" id="checker-delete-selected" title="${t('checkerDeleteSelectedTitle')}">${t('checkerDeleteSelectedBtn')}</button>
       </div>` : ''}
       <div class="checker-table-wrap"><table class="checker-table">
         <thead><tr>
           ${problemCount > 0 ? '<th style="width:30px"></th>' : ''}
-          <th>状态</th><th>书签名称</th><th>网址</th><th>信息</th>
+          <th>${t('checkerTableHeaderStatus')}</th><th>${t('checkerTableHeaderTitle')}</th><th>${t('checkerTableHeaderUrl')}</th><th>${t('checkerTableHeaderCode')}</th>
         </tr></thead>
         <tbody>${sorted.map(([id, r]) => {
           const isProblem = r.status !== 'valid';
@@ -289,11 +292,11 @@ const BookmarkChecker = {
     newDialog.innerHTML = `<div class="checker-overlay"></div>
       <div class="checker-content checker-results">
         <div class="checker-header">
-          <h3>检查结果 (${stats.total} 个书签)</h3>
+          <h3>${t('checkerResultsTitle', [stats.total])}</h3>
           <div>
-            <button class="checker-action-btn" id="checker-recheck-btn">重新检查问题项</button>
-            <button class="checker-action-btn" id="checker-restore-btn" title="恢复上次删除前自动备份的书签">↩️ 恢复备份</button>
-            <button class="checker-close" id="checker-close-btn">关闭</button>
+            <button class="checker-action-btn" id="checker-recheck-btn">${t('checkerRecheckBtn')}</button>
+            <button class="checker-action-btn" id="checker-restore-btn" title="${t('checkerRestoreBtnTitle')}">${t('checkerRestoreBtn')}</button>
+            <button class="checker-close" id="checker-close-btn">${t('checkerCloseBtn')}</button>
           </div>
         </div>
         <div class="checker-body">${bodyHTML}</div>
@@ -330,7 +333,7 @@ const BookmarkChecker = {
     if (openBtn) {
       openBtn.addEventListener('click', () => {
         const selected = this._getSelectedIds();
-        if (selected.length === 0) { alert('请先勾选要操作的书签'); return; }
+        if (selected.length === 0) { alert(t('checkerSelectFirstAlert')); return; }
         selected.forEach(id => {
           const r = this.results.get(id);
           if (r && r.url) {
@@ -344,11 +347,11 @@ const BookmarkChecker = {
     if (copyBtn) {
       copyBtn.addEventListener('click', () => {
         const selected = this._getSelectedIds();
-        if (selected.length === 0) { alert('请先勾选要操作的书签'); return; }
+        if (selected.length === 0) { alert(t('checkerSelectFirstAlert')); return; }
         const urls = selected.map(id => this.results.get(id)?.url).filter(Boolean).join('\n');
         navigator.clipboard.writeText(urls).then(() => {
-          copyBtn.textContent = '✅ 已复制';
-          setTimeout(() => { copyBtn.textContent = '📋 复制链接'; }, 1500);
+          copyBtn.textContent = t('checkerCopiedBtn');
+          setTimeout(() => { copyBtn.textContent = t('checkerCopySelectedBtn'); }, 1500);
         });
       });
     }
@@ -356,12 +359,12 @@ const BookmarkChecker = {
     if (deleteBtn) {
       deleteBtn.addEventListener('click', async () => {
         const selected = this._getSelectedIds();
-        if (selected.length === 0) { alert('请先勾选要操作的书签'); return; }
+        if (selected.length === 0) { alert(t('checkerSelectFirstAlert')); return; }
         const items = selected.map(id => this.results.get(id)).filter(Boolean);
         // confirm 列出前若干个书名，避免"只看数量"的误删
         const names = items.slice(0, 10).map(r => `· ${r.title || r.url}`).join('\n');
-        const more = items.length > 10 ? `\n……等共 ${items.length} 个` : '';
-        if (!confirm(`确定要删除以下 ${items.length} 个书签吗？此操作不可撤销。\n\n${names}${more}`)) return;
+        const more = items.length > 10 ? t('checkerDeleteMoreSuffix', [items.length]) : '';
+        if (!confirm(t('checkerDeleteConfirm', [items.length, names, more]))) return;
         // 删除前自动备份，误删后可通过"恢复备份"找回
         await this._backupForDelete(items);
         let deleted = 0;
@@ -379,7 +382,7 @@ const BookmarkChecker = {
             console.error('删除书签失败:', id, e);
           }
         }
-        alert(`已删除 ${deleted} 个书签。删除前已自动备份，可点击"恢复备份"撤销。`);
+        alert(t('checkerDeleteDoneAlert', [deleted]));
         this.showResultsDialog();
       });
     }
@@ -421,9 +424,9 @@ const BookmarkChecker = {
     } catch (e) {
       console.error('读取删除备份失败:', e);
     }
-    if (!backup || !backup.items || backup.items.length === 0) { alert('没有可恢复的备份'); return; }
+    if (!backup || !backup.items || backup.items.length === 0) { alert(t('checkerNoBackupAlert')); return; }
     const timeStr = new Date(backup.time).toLocaleString();
-    if (!confirm(`将恢复 ${timeStr} 备份的 ${backup.items.length} 个书签。继续？`)) return;
+    if (!confirm(t('checkerRestoreConfirm', [timeStr, backup.items.length]))) return;
     let restored = 0;
     for (const item of backup.items) {
       try {
@@ -448,7 +451,7 @@ const BookmarkChecker = {
         console.error('恢复书签失败:', item, e);
       }
     }
-    alert(`已恢复 ${restored} / ${backup.items.length} 个书签`);
+    alert(t('checkerRestoreDoneAlert', [restored, backup.items.length]));
     this.showResultsDialog();
   },
 
@@ -469,7 +472,7 @@ const BookmarkChecker = {
         this.results.delete(id);
       }
     });
-    await this._runCheck(invalidBookmarks, '没有需要重新检查的书签');
+    await this._runCheck(invalidBookmarks, t('noInvalidToRecheck'));
   },
 
   closeDialog() {
@@ -538,7 +541,7 @@ if (typeof window !== 'undefined') {
       await BookmarkChecker.checkAllBookmarks();
     } catch (error) {
       console.error('检查器启动失败:', error);
-      alert('检查器启动失败: ' + error.message);
+      alert(t('checkerStartFailAlert', [error.message]));
     }
   }
 

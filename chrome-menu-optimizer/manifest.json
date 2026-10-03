@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Bookmark Viewer",
-  "version": "2.0",
-  "description": "点击图标即可在一个弹出窗口中查看您的所有书签。",
+  "name": "__MSG_extensionName__",
+  "version": "2.1",
+  "description": "__MSG_extensionDescription__",
+  "default_locale": "zh_CN",
   "permissions": [
     "bookmarks",
     "activeTab",

@@ -3,6 +3,9 @@ let currentFolderId = null; // 初始为null，动态获取
 let searchTerm = '';
 let currentTargetNodeId = null;
 
+// 国际化取词（i18n.js 必须先于本文件加载；缺失时退化为直接返回 key）
+var t = (typeof window !== 'undefined' && window.BMV && window.BMV.i18n) ? window.BMV.i18n.t : function (key) { return key; };
+
 // favicon 加载失败时的占位图（原内联 data URI，提取为常量避免重复）
 const FALLBACK_FAVICON = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiByeD0iMiIgZmlsbD0iIzRhOTBlMiIvPgo8dGV4dCB4PSI4IiB5PSIxMSIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn5OQPC90ZXh0Pgo8L3N2Zz4K';
 
@@ -46,7 +49,7 @@ async function initializeExtension() {
   try {
     // 检查Chrome API可用性
     if (!chrome || !chrome.bookmarks) {
-      throw new Error('Chrome书签API不可用');
+      throw new Error(t('chromeApiUnavailable'));
     }
     
     // 注册变更监听并全量加载书签树（getTree 成功即代表书签权限可用）
@@ -91,9 +94,9 @@ async function initializeExtension() {
     if (bookmarksContainer) {
       bookmarksContainer.innerHTML = `
         <div class="error">
-          ❌ 初始化失败<br>
+          ${t('errorInitFailed')}<br>
           <small>${error.message}</small><br>
-          <button class="retry-btn">重试</button>
+          <button class="retry-btn">${t('retryButton')}</button>
         </div>
       `;
       const retryBtn = bookmarksContainer.querySelector('button.retry-btn');
@@ -117,7 +120,7 @@ function setupViewSettings() {
     columnsSel.value = String(s.columns);
     previewSel.value = String(s.preview);
     if (hint) {
-      hint.textContent = `${s.columns} 列 · 每卡 ${s.preview > 0 ? s.preview + ' 项' : '不显示预览'}`;
+      hint.textContent = s.preview > 0 ? t('viewSettingsHintWithPreview', [s.columns, s.preview]) : t('viewSettingsHintNoPreview', [s.columns]);
     }
   };
   apply();
@@ -222,7 +225,7 @@ function setupBookmarksDelegation() {
       await renderBookmarks(folderId);
     } catch (error) {
       console.error('打开文件夹时出错:', error);
-      container.innerHTML = '<div class="error">❌ 无法打开文件夹</div>';
+      container.innerHTML = '<div class="error">' + t('errorOpenFolderFailed') + '</div>';
     }
   };
   
@@ -246,7 +249,7 @@ function setupBookmarksDelegation() {
       bookmarkUsageManager.recordUsage(bookmark.id, bookmark.url, bookmark.title);
       
       if (isDangerousUrl(bookmark.url)) {
-        alert('该链接协议不受支持，无法打开');
+        alert(t('alertUnsupportedProtocol'));
         return;
       }
       if (isExtensionEnvironment) {
@@ -429,7 +432,7 @@ function setupDragAndDrop() {
       const invalid = state.isFolder && BMV.bookmarkTree.isSelfOrAncestorOf(state.id, folderTargetId);
       resetDnD();
       if (invalid) {
-        alert('不能将文件夹移动到它自己或它的子文件夹中');
+        alert(t('alertMoveFolderIntoSelf'));
         return;
       }
       moveBookmarkTo(state.id, { parentId: folderTargetId });
@@ -483,7 +486,7 @@ function setupDragAndDrop() {
       resetDnD();
       if (!targetId || targetId === state.fromFolderId || targetId === state.id) return;
       if (state.isFolder && BMV.bookmarkTree.isSelfOrAncestorOf(state.id, targetId)) {
-        alert('不能将文件夹移动到它自己或它的子文件夹中');
+        alert(t('alertMoveFolderIntoSelf'));
         return;
       }
       moveBookmarkTo(state.id, { parentId: targetId });
@@ -515,7 +518,7 @@ async function moveBookmarkTo(id, destination) {
     await renderBookmarks(currentFolderId);
   } catch (error) {
     console.error('移动书签失败:', error);
-    alert('移动失败: ' + error.message);
+    alert(t('alertMoveFailed', [error.message]));
   }
 }
 
@@ -530,7 +533,7 @@ async function renderSearchResults() {
   if (settingsRow) settingsRow.style.display = 'none';
   
   // 显示加载状态
-  bookmarksContainer.innerHTML = '<div class="loading">正在搜索所有书签...</div>';
+  bookmarksContainer.innerHTML = '<div class="loading">' + t('loadingSearchingBookmarks') + '</div>';
   
   try {
     // 获取所有书签
@@ -546,11 +549,11 @@ async function renderSearchResults() {
     if (filteredBookmarks.length === 0) {
       bookmarksContainer.innerHTML = `
         <div class="empty-state">
-          🔍 没有找到匹配的书签
+          ${t('searchNoResultsTitle')}
           <div class="search-tips">
-            <div>• 尝试不同的关键词</div>
-            <div>• 检查拼写</div>
-            <div>• 搜索支持拼音首字母或全拼</div>
+            <div>${t('searchTipDifferentKeywords')}</div>
+            <div>${t('searchTipCheckSpelling')}</div>
+            <div>${t('searchTipPinyinSupport')}</div>
           </div>
         </div>
       `;
@@ -563,7 +566,7 @@ async function renderSearchResults() {
     // 更新面包屑为搜索状态
     const breadcrumbContainer = document.getElementById('breadcrumb');
     breadcrumbContainer.innerHTML = `
-      <span>搜索结果:</span> 
+      <span>${t('breadcrumbSearchResultsLabel')}</span> 
       <span class="search-term-highlight">${escapeHtml(searchTerm)}</span>
     `;
     breadcrumbContainer.style.display = 'flex';
@@ -596,7 +599,7 @@ async function renderSearchResults() {
       if (rendered < filteredBookmarks.length) {
         const moreItem = document.createElement('li');
         moreItem.className = 'more-items-link load-more-item';
-        moreItem.innerHTML = `<span>加载更多（还有 ${filteredBookmarks.length - rendered} 个）...</span>`;
+        moreItem.innerHTML = `<span>${t('loadMoreButton', [filteredBookmarks.length - rendered])}...</span>`;
         pendingLoadMore = renderBatch;
         resultsContainer.appendChild(moreItem);
       }
@@ -607,7 +610,7 @@ async function renderSearchResults() {
     console.error('搜索失败:', error);
     bookmarksContainer.innerHTML = `
       <div class="error">
-        ❌ 搜索时出错
+        ${t('errorSearchFailed')}
         <small>${error.message}</small>
       </div>
     `;
@@ -637,7 +640,7 @@ async function createSearchResultItem(bookmark) {
 ${bookmark.url}`;
   if (usageCount > 0) {
     tooltipText += `
-使用次数: ${usageText}`;
+${t('tooltipUsageCount', [usageText])}`;
   }
   
   listItem.innerHTML = `
@@ -661,19 +664,19 @@ async function renderBookmarks(folderId) {
   if (settingsRow) settingsRow.style.display = '';
   
   // 显示加载状态
-  bookmarksContainer.innerHTML = '<div class="loading">正在加载书签...</div>';
+  bookmarksContainer.innerHTML = '<div class="loading">' + t('loadingBookmarksEllipsis') + '</div>';
   
   try {
     // 验证容器元素
     if (!bookmarksContainer) {
-      throw new Error('找不到书签容器元素');
+      throw new Error(t('errorBookmarkContainerNotFound'));
     }
     
     const bookmarks = await BMV.bookmarkTree.getBookmarks(folderId);
     await updateBreadcrumb(folderId);
     
     if (!bookmarks || bookmarks.length === 0) {
-      bookmarksContainer.innerHTML = '<div class="empty-state">📭 这个文件夹是空的</div>';
+      bookmarksContainer.innerHTML = '<div class="empty-state">' + t('emptyFolderMessage') + '</div>';
       updateStats(0, 0);
       return;
     }
@@ -721,7 +724,7 @@ async function renderBookmarks(folderId) {
       if (rendered < bookmarks.length) {
         const moreItem = document.createElement('li');
         moreItem.className = 'more-items-link load-more-item';
-        moreItem.innerHTML = `<span>加载更多（还有 ${bookmarks.length - rendered} 个）...</span>`;
+        moreItem.innerHTML = `<span>${t('loadMoreButton', [bookmarks.length - rendered])}...</span>`;
         pendingLoadMore = renderBatch;
         gridContainer.appendChild(moreItem);
       }
@@ -735,12 +738,12 @@ async function renderBookmarks(folderId) {
     applySearchFilter();
   } catch (error) {
     console.error('渲染书签时出错:', error);
-    const errorMessage = error.message || '未知错误';
+    const errorMessage = error.message || t('unknownError');
     bookmarksContainer.innerHTML = `
       <div class="error">
-        ❌ 加载书签失败<br>
+        ${t('errorLoadBookmarksFailed')}<br>
         <small>${errorMessage}</small><br>
-        <button class="retry-btn">重试</button>
+        <button class="retry-btn">${t('retryButton')}</button>
       </div>
     `;
     const retryBtn = bookmarksContainer.querySelector('button.retry-btn');
@@ -768,7 +771,7 @@ async function updateBreadcrumb(folderId) {
     path.forEach((item, index) => {
       if (index > 0) {
         const separator = document.createElement('span');
-        separator.textContent = ' › ';
+        separator.textContent = t('breadcrumbSeparator');
         breadcrumbContainer.appendChild(separator);
       }
       
@@ -844,9 +847,9 @@ function createBookmarkElement(bookmark) {
         // 构建工具提示信息
         let tooltipText = child.title;
         if (usageCount > 0) {
-          tooltipText += `\n使用次数: ${usageText}`;
+          tooltipText += `\n${t('tooltipUsageCount', [usageText])}`;
           if (lastUsed) {
-            tooltipText += `\n最后使用: ${lastUsed}`;
+            tooltipText += `\n${t('tooltipLastUsed', [lastUsed])}`;
           }
         }
         
@@ -869,8 +872,8 @@ function createBookmarkElement(bookmark) {
         const moreItem = document.createElement('li');
         moreItem.className = 'nested-item more-items-link';
         moreItem.dataset.folderId = bookmark.id;
-        moreItem.innerHTML = `<span>还有 ${bookmarkChildren.length - previewCount} 个项目...</span>`;
-        moreItem.title = `点击查看 ${bookmark.title} 文件夹中的所有项目`;
+        moreItem.innerHTML = `<span>${t('folderPreviewMoreItems', [bookmarkChildren.length - previewCount])}</span>`;
+        moreItem.title = t('tooltipViewAllItemsInFolder', [bookmark.title]);
         nestedList.appendChild(moreItem);
       }
       
@@ -898,7 +901,7 @@ function createBookmarkElement(bookmark) {
     let shouldShowPath = searchTerm && searchTerm.trim() !== '';
     
     if (shouldShowPath) {
-      folderPathText = '书签栏';
+      folderPathText = t('defaultBookmarkBarPath');
       // 立即调用异步函数
       (async () => {
         try {
@@ -917,15 +920,15 @@ function createBookmarkElement(bookmark) {
     // 构建工具提示信息
     let tooltipText = bookmark.title;
     if (usageCount > 0) {
-      tooltipText += `\n使用次数: ${usageText}`;
+      tooltipText += `\n${t('tooltipUsageCount', [usageText])}`;
       if (lastUsed) {
-        tooltipText += `\n最后使用: ${lastUsed}`;
+        tooltipText += `\n${t('tooltipLastUsed', [lastUsed])}`;
       }
     }
     
     listItem.innerHTML = `
       <a href="${isDangerousUrl(bookmark.url) ? '#' : escapeHtml(bookmark.url)}" class="bookmark-link" title="${escapeHtml(tooltipText)}">
-        <img src="${faviconUrl}" alt="Favicon" class="favicon">
+        <img src="${faviconUrl}" alt="${t('faviconAltText')}" class="favicon">
         <div class="bookmark-info">
           <div class="bookmark-title">${escapeHtml(bookmark.title)}</div>
           ${shouldShowPath ? `<div class="bookmark-path">${escapeHtml(folderPathText)}</div>` : ''}
@@ -1017,9 +1020,9 @@ function renderStats() {
   if (searchTerm) {
     const color = viewState.matchCount > 0 ? '#4a90e2' : '#ff6b6b';
     const icon = viewState.matchCount > 0 ? '🔍' : '❌';
-    statsElement.innerHTML = `<span style="color: ${color};">${icon} 搜索结果: ${viewState.matchCount} 项</span>`;
+    statsElement.innerHTML = `<span style="color: ${color};">${icon} ${t('statsSearchResultCount', [viewState.matchCount])}</span>`;
   } else {
-    statsElement.innerHTML = `<span id="bookmark-count">${viewState.bookmarkCount}</span> 个书签 | <span id="folder-count">${viewState.folderCount}</span> 个文件夹`;
+    statsElement.innerHTML = t('statsBookmarkFolderCount', [viewState.bookmarkCount, viewState.folderCount]);
   }
 }
 
@@ -1037,7 +1040,7 @@ function updateSearchStatus(matchCount, totalCount) {
       } else {
         searchBox.classList.remove('search-no-results');
       }
-      searchBox.title = `找到 ${matchCount} 个匹配项（共 ${totalCount} 项）`;
+      searchBox.title = t('searchMatchStatusTooltip', [matchCount, totalCount]);
     } else {
       // 清除搜索状态
       searchBox.classList.remove('search-active', 'search-no-results');
@@ -1148,7 +1151,7 @@ function showContextMenu(event, bookmark) {
     updateToCurrentUrlItem.style.display = 'block';
     clearUsageItem.style.display = 'block';
     checkValidityItem.style.display = 'block';
-    checkValidityItem.textContent = '🔍 检查有效性';
+    checkValidityItem.textContent = t('menuCheckValidity');
     editItem.style.display = 'block';
     deleteItem.style.display = 'block';
   } else {
@@ -1159,7 +1162,7 @@ function showContextMenu(event, bookmark) {
     updateToCurrentUrlItem.style.display = 'none';
     clearUsageItem.style.display = 'none';
     checkValidityItem.style.display = 'block';
-    checkValidityItem.textContent = '🔍 检查文件夹';
+    checkValidityItem.textContent = t('contextMenuCheckFolder');
     editItem.style.display = 'block';
     deleteItem.style.display = 'block';
   }
@@ -1184,7 +1187,7 @@ function handleContextMenuAction(action, bookmark) {
   switch (action) {
     case 'open-in-background':
       if (bookmark.url) {
-        if (isDangerousUrl(bookmark.url)) { alert('该链接协议不受支持，无法打开'); break; }
+        if (isDangerousUrl(bookmark.url)) { alert(t('alertUnsupportedProtocol')); break; }
         chrome.tabs.create({ url: bookmark.url, active: false });
       }
       break;
@@ -1202,7 +1205,7 @@ function handleContextMenuAction(action, bookmark) {
       }
       break;
     case 'clear-usage':
-      if (bookmark.url && confirm(`确定要清除 "${bookmark.title}" 的使用记录吗？`)) {
+      if (bookmark.url && confirm(t('confirmClearUsage', [bookmark.title]))) {
         bookmarkUsageManager.clearUsage(bookmark.id);
         // 重新渲染当前文件夹以更新显示
         renderBookmarks(currentFolderId);
@@ -1212,7 +1215,7 @@ function handleContextMenuAction(action, bookmark) {
       showEditDialog(bookmark);
       break;
     case 'delete':
-      if (confirm(`确定要删除 "${bookmark.title}" 吗？`)) {
+      if (confirm(t('confirmDeleteBookmark', [bookmark.title]))) {
         chrome.bookmarks.remove(bookmark.id, function() {
           if (chrome.runtime.lastError) {
             console.error('删除书签失败:', chrome.runtime.lastError);
@@ -1226,7 +1229,7 @@ function handleContextMenuAction(action, bookmark) {
       break;
     case 'check-validity':
       if (typeof bookmarkChecker === 'undefined') {
-        alert('书签检查器未加载，请重新加载扩展');
+        alert(t('alertCheckerNotLoaded'));
         break;
       }
       // 打开独立检查器页（书签单个 / 文件夹整检），长任务不受 popup 关闭影响
@@ -1285,14 +1288,14 @@ function saveEdit() {
   const newUrl = urlInput.value.trim();
   
   if (!newTitle) {
-    alert('标题不能为空');
+    alert(t('alertTitleEmpty'));
     titleInput.focus();
     return;
   }
   
   // 如果是书签且URL为空，提示错误
   if (urlGroup.style.display !== 'none' && !newUrl) {
-    alert('书签URL不能为空');
+    alert(t('alertUrlEmpty'));
     urlInput.focus();
     return;
   }
@@ -1308,7 +1311,7 @@ function saveEdit() {
     chrome.bookmarks.update(bookmarkId, updateData, function(result) {
       if (chrome.runtime.lastError) {
         console.error('更新书签失败:', chrome.runtime.lastError);
-        alert('保存失败: ' + chrome.runtime.lastError.message);
+        alert(t('alertSaveFailed', [chrome.runtime.lastError.message]));
       } else {
         hideEditDialog();
         BMV.bookmarkTree.invalidateBookmarkTree(); // 内存树失效，下次读取自动重建
@@ -1320,7 +1323,7 @@ function saveEdit() {
     // 测试环境模拟
     console.log('模拟更新书签:', updateData);
     hideEditDialog();
-    alert('编辑功能在测试环境中已模拟完成');
+    alert(t('alertEditSimulated'));
   }
 }
 
@@ -1331,12 +1334,12 @@ function updateBookmarkToCurrentUrl(bookmark) {
     chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
       if (chrome.runtime.lastError) {
         console.error('获取当前标签页失败:', chrome.runtime.lastError);
-        alert('获取当前标签页失败: ' + chrome.runtime.lastError.message);
+        alert(t('alertGetCurrentTabFailed', [chrome.runtime.lastError.message]));
         return;
       }
       
       if (tabs.length === 0) {
-        alert('未找到当前活动标签页');
+        alert(t('alertNoActiveTab'));
         return;
       }
       
@@ -1345,10 +1348,10 @@ function updateBookmarkToCurrentUrl(bookmark) {
       const currentTitle = currentTab.title;
       
       // 确认是否要更新
-      const confirmMessage = `确定要将书签 "${bookmark.title}" 的地址更新为当前页面吗？\n\n` +
-                           `当前地址: ${bookmark.url}\n` +
-                           `新地址: ${currentUrl}\n` +
-                           `新标题: ${currentTitle}`;
+      const confirmMessage = `${t('confirmUpdateToCurrentUrl', [bookmark.title])}\n\n` +
+                           `${t('labelCurrentUrl', [bookmark.url])}\n` +
+                           `${t('labelNewUrl', [currentUrl])}\n` +
+                           `${t('labelNewTitle', [currentTitle])}`;
       
       if (confirm(confirmMessage)) {
         // 更新书签
@@ -1360,9 +1363,9 @@ function updateBookmarkToCurrentUrl(bookmark) {
         chrome.bookmarks.update(bookmark.id, updateData, function(result) {
           if (chrome.runtime.lastError) {
             console.error('更新书签失败:', chrome.runtime.lastError);
-            alert('更新书签失败: ' + chrome.runtime.lastError.message);
+            alert(t('alertUpdateFailed', [chrome.runtime.lastError.message]));
           } else {
-            alert(`书签已成功更新为当前页面！\n标题: ${currentTitle}`);
+            alert(t('alertBookmarkUpdated', [currentTitle]));
             BMV.bookmarkTree.invalidateBookmarkTree(); // 内存树失效，下次读取自动重建
             // 重新渲染当前文件夹
             renderBookmarks(currentFolderId);
@@ -1373,12 +1376,12 @@ function updateBookmarkToCurrentUrl(bookmark) {
   } else {
     // 测试环境模拟
     const mockCurrentUrl = 'https://example.com/current-page';
-    const mockCurrentTitle = '当前页面标题';
+    const mockCurrentTitle = t('mockCurrentPageTitle');
     
-    const confirmMessage = `确定要将书签 "${bookmark.title}" 的地址更新为当前页面吗？\n\n` +
-                         `当前地址: ${bookmark.url}\n` +
-                         `新地址: ${mockCurrentUrl}\n` +
-                         `新标题: ${mockCurrentTitle}`;
+    const confirmMessage = `${t('confirmUpdateToCurrentUrl', [bookmark.title])}\n\n` +
+                         `${t('labelCurrentUrl', [bookmark.url])}\n` +
+                         `${t('labelNewUrl', [mockCurrentUrl])}\n` +
+                         `${t('labelNewTitle', [mockCurrentTitle])}`;
     
     if (confirm(confirmMessage)) {
       console.log('模拟更新书签:', {
@@ -1387,7 +1390,7 @@ function updateBookmarkToCurrentUrl(bookmark) {
         newUrl: mockCurrentUrl,
         newTitle: mockCurrentTitle
       });
-      alert(`测试环境：书签已模拟更新为当前页面！\n标题: ${mockCurrentTitle}`);
+      alert(t('alertBookmarkSimulatedUpdated', [mockCurrentTitle]));
     }
   }
 }

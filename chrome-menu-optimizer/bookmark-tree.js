@@ -1,3 +1,5 @@
+var t = (typeof window !== 'undefined' && window.BMV && window.BMV.i18n) ? window.BMV.i18n.t : function (key) { return key; };
+
 // 共享书签树模块（popup 与检查器页共用）
 // 一次 getTree 全量拉取并建 id→node/parentId 索引，面包屑 / 文件夹预览 / 搜索路径
 // 全部内存查询（零 IPC）；通过 chrome.bookmarks 变更监听 + CRUD 后主动失效保持新鲜。
@@ -34,7 +36,7 @@
       chrome.bookmarks.getTree(function (bookmarkTree) {
         if (chrome.runtime.lastError) {
           if (epoch === treeEpoch) treeLoadPromise = null;
-          reject(new Error(`获取书签树失败: ${chrome.runtime.lastError.message}`));
+          reject(new Error(t('errGetTreeFailed', [chrome.runtime.lastError.message])));
           return;
         }
         try {
@@ -85,7 +87,7 @@
     if (children.length > 0) return children[0].id;
     const byTitle = children.find(c => /书签栏|Bookmarks bar/i.test(c.title || ''));
     if (byTitle) return byTitle.id;
-    throw new Error('无法找到书签栏');
+    throw new Error(t('errBookmarkBarNotFound'));
   }
 
   // 递归获取所有书签（基于内存树索引，零 IPC；排除根节点自身）
@@ -102,8 +104,8 @@
 
   // 获取特定文件夹的子项（优先读内存树索引，零 IPC；树不可用时回退 API）
   async function getBookmarks(folderId) {
-    if (!folderId) throw new Error('文件夹ID无效');
-    if (!chrome || !chrome.bookmarks) throw new Error('Chrome书签API不可用');
+    if (!folderId) throw new Error(t('errInvalidFolderId'));
+    if (!chrome || !chrome.bookmarks) throw new Error(t('chromeApiUnavailable'));
     try {
       const tree = await ensureBookmarkTree();
       const node = tree.nodeById.get(folderId);
@@ -113,7 +115,7 @@
     }
     return new Promise((resolve, reject) => {
       chrome.bookmarks.getChildren(folderId, function (bookmarks) {
-        if (chrome.runtime.lastError) reject(new Error(`获取书签失败: ${chrome.runtime.lastError.message}`));
+        if (chrome.runtime.lastError) reject(new Error(t('errGetBookmarksFailed', [chrome.runtime.lastError.message])));
         else resolve(bookmarks || []);
       });
     });
@@ -128,7 +130,7 @@
       while (currentId && currentId !== tree.rootId) {
         const node = tree.nodeById.get(currentId);
         if (!node) break;
-        path.unshift({ id: node.id, title: node.title || '书签栏' });
+        path.unshift({ id: node.id, title: node.title || t('bookmarkBarName') });
         currentId = node.parentId;
       }
     } catch (error) {
@@ -139,13 +141,13 @@
 
   // 获取文件夹路径字符串
   async function getFolderPath(parentId) {
-    if (!parentId || parentId === '0') return '书签栏';
+    if (!parentId || parentId === '0') return t('bookmarkBarName');
     try {
       const path = await buildBreadcrumbPath(parentId);
-      return path.map(item => item.title).join(' › ') || '书签栏';
+      return path.map(item => item.title).join(t('breadcrumbSeparator')) || t('bookmarkBarName');
     } catch (error) {
       console.error('获取文件夹路径失败:', error);
-      return '未知位置';
+      return t('unknownLocation');
     }
   }
 

@@ -5,6 +5,7 @@ const path = require('path');
 const vm = require('vm');
 
 const FILE = path.join(__dirname, '..', 'chrome-menu-optimizer', 'bookmark-tree.js');
+const I18N_FILE = path.join(__dirname, '..', 'chrome-menu-optimizer', 'i18n.js');
 
 const TREE = [{
   id: '0', title: '',
@@ -49,6 +50,7 @@ function makeSandbox() {
   });
   sandbox.window = sandbox;
   vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(I18N_FILE, 'utf8'), sandbox); // i18n 助手先于模块加载
   vm.runInContext(fs.readFileSync(FILE, 'utf8'), sandbox);
   return { sandbox, calls, listeners };
 }
