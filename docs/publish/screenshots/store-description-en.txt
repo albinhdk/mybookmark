@@ -1,0 +1,18 @@
+Tired of digging through a cramped bookmarks bar? Bookmark Viewer puts all your bookmarks into one clean grid popup — click the toolbar icon to view, search, and organize everything.
+
+[Key features]
+- Grid overview: click the toolbar icon to see all bookmarks tiled in a grid; click any card to open it
+- Instant search: filter as you type — English and Chinese both work, including pinyin initials, full pinyin, and polyphonic characters
+- Dead-link check: verify with one click whether bookmarked pages are still reachable (http/https)
+- Drag & drop: move bookmarks between folders and reorder them right inside the popup
+- Create / rename / delete: everyday cleanup via the context menu, saved straight to your browser bookmarks
+- View settings: adjustable grid columns (2–5) and folder preview count, stored locally
+- UI language: automatically follows your browser language (English / 中文)
+
+[Why it's safe]
+- Zero page injection: no content scripts, never modifies web pages, no tracking
+- Local data: your bookmarks never leave the browser; no servers involved
+- Works out of the box: no sign-up, no login, no ads
+
+[Compatibility]
+Microsoft Edge and other Chromium-based browsers.
