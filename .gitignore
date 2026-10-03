@@ -1,0 +1,5 @@
+# 打包产物（python tests/package.py 可重新生成）
+dist/
+
+# 本地工具配置（MCP 浏览器自动化等，与项目无关）
+config/
