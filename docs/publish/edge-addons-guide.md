@@ -4,8 +4,8 @@
 
 | 版本 | 内容 | 商店状态 |
 |---|---|---|
-| 2.0 | 首个提交（favicon 修复后打包） | ✅ 已提交，审核中（In review） |
-| 2.1 | 国际化（zh/en 自动切换）+ manifest description 本地化 | 待提交（`dist/bookmark-viewer-2.1-edge.zip`） |
+| 2.0 | 首个提交（favicon 修复后打包） | ✅ 已上架（In the Store，2026-10-01） |
+| 2.1 | 国际化（zh/en 自动切换）+ manifest description 本地化 | ✅ 已提交，审核中（In review，2026-10-03；双 listing zh-CN + en-US 已填妥） |
 
 > 2.1 提交流程：等 2.0 审核通过并上架后，在 Partner Center 上传 2.1 包提交更新；
 > 或取消 2.0  submission 直接用 2.1 重新提交（已安装用户不受影响）。
