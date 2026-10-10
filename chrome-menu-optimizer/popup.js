@@ -43,8 +43,24 @@ const isExtensionEnvironment = !!(typeof chrome !== 'undefined' && chrome.bookma
 
 // 初始化
 document.addEventListener('DOMContentLoaded', function() {
+  renderAppVersion();
   initializeExtension();
 });
+
+// 版本号始终读取当前安装包的 manifest，避免发布新版本时重复维护 UI 文案。
+function renderAppVersion() {
+  const versionElement = document.getElementById('app-version');
+  if (!versionElement || typeof chrome === 'undefined' || !chrome.runtime || typeof chrome.runtime.getManifest !== 'function') return;
+
+  try {
+    const version = chrome.runtime.getManifest().version;
+    if (!version) return;
+    versionElement.textContent = t('appVersion', [version]);
+    versionElement.hidden = false;
+  } catch (error) {
+    // file:// 测试环境不一定提供 manifest API；此时不显示占位版本。
+  }
+}
 
 // 初始化扩展
 async function initializeExtension() {
@@ -332,6 +348,13 @@ function getGridCards(grid) {
   );
 }
 
+// 文件夹预览中的书签行（不包括“还有X个”链接）
+function getNestedCards(list) {
+  return Array.from(list.children).filter(li =>
+    li.classList.contains('nested-item') && li.dataset.bookmarkId
+  );
+}
+
 // 指针所在网格内的插入位置：取最近的可放置卡片（跳过被拖项），
 // 以卡片水平中线判定落在其前还是后（多列网格的列间空隙由最近卡片兜底）
 function resolveGridInsertTarget(grid, clientX, clientY, excludeCard) {
@@ -374,23 +397,31 @@ function setupDragAndDrop() {
   // dragstart：记录被拖项与其原始位置（先算 fromIndex 再置灰，
   // 避免 dragging 卡片被过滤导致索引坐标系不一致）
   container.addEventListener('dragstart', function(e) {
-    const card = e.target.closest('.bookmark-item');
     const handle = e.target.closest('.bookmark-drag-handle');
+    const nestedItem = e.target.closest('.nested-item[data-bookmark-id]');
+    const card = nestedItem || e.target.closest('.bookmark-item');
     if (!card || !handle || !card.contains(handle)) {
       e.preventDefault();
       return;
     }
     const bookmark = currentRenderData.get(card.dataset.bookmarkId);
     if (!bookmark) return;
-    const grid = card.closest('.bookmark-grid');
+    const list = nestedItem ? nestedItem.parentElement : card.closest('.bookmark-grid');
+    const siblings = nestedItem ? getNestedCards(list) : getGridCards(list);
     dndState = {
       id: bookmark.id,
       isFolder: !bookmark.url,
-      fromFolderId: currentFolderId,
-      fromIndex: grid ? getGridCards(grid).indexOf(card) : -1
+      isNested: !!nestedItem,
+      fromFolderId: nestedItem ? bookmark.parentId : currentFolderId,
+      fromIndex: nestedItem ? Number(nestedItem.dataset.siblingIndex) : (list ? siblings.indexOf(card) : -1)
     };
     e.dataTransfer.setData('text/plain', bookmark.title || '');
     e.dataTransfer.effectAllowed = 'move';
+    // 默认拖拽预览只是被抓住的小手柄；显示整张卡片，用户能确认正在移动哪条书签。
+    if (typeof e.dataTransfer.setDragImage === 'function') {
+      const cardRect = card.getBoundingClientRect();
+      e.dataTransfer.setDragImage(card, e.clientX - cardRect.left, e.clientY - cardRect.top);
+    }
     card.classList.add('dnd-dragging');
   });
 
@@ -399,6 +430,39 @@ function setupDragAndDrop() {
     if (!dndState) return;
     e.preventDefault(); // 不阻止默认则 drop 不触发
     clearDropVisuals();
+    dndState.insertTarget = null;
+
+    // 文件夹卡片内的预览书签只在同一文件夹的预览列表中排序。
+    if (dndState.isNested) {
+      const nestedTarget = e.target.closest('.nested-item[data-bookmark-id]');
+      const targetFolderId = nestedTarget && nestedTarget.dataset.parentId;
+      if (nestedTarget && targetFolderId === dndState.fromFolderId) {
+        if (nestedTarget.dataset.bookmarkId === dndState.id) {
+          e.dataTransfer.dropEffect = 'none';
+          return;
+        }
+        const rect = nestedTarget.getBoundingClientRect();
+        const position = e.clientY >= rect.top + rect.height / 2 ? 'after' : 'before';
+        nestedTarget.classList.add(position === 'after' ? 'dnd-drop-after' : 'dnd-drop-before');
+        dndState.insertTarget = { bookmarkId: nestedTarget.dataset.bookmarkId, position };
+        e.dataTransfer.dropEffect = 'move';
+        return;
+      }
+      // 拖到另一个文件夹卡片上仍表示移入；拖到当前所属文件夹本身不做操作。
+      const nestedFolderCard = e.target.closest('.folder-item');
+      if (nestedFolderCard) {
+        const targetId = nestedFolderCard.dataset.bookmarkId;
+        if (targetId !== dndState.fromFolderId) {
+          nestedFolderCard.classList.add('dnd-drop-into');
+          e.dataTransfer.dropEffect = 'move';
+        } else {
+          e.dataTransfer.dropEffect = 'none';
+        }
+        return;
+      }
+      e.dataTransfer.dropEffect = 'none';
+      return;
+    }
 
     const folderCard = e.target.closest('.folder-item');
     if (folderCard) {
@@ -431,6 +495,36 @@ function setupDragAndDrop() {
     if (!dndState) return;
     e.preventDefault();
     const state = dndState;
+
+    if (state.isNested) {
+      const nestedTarget = e.target.closest('.nested-item[data-bookmark-id]');
+      const folderCard = e.target.closest('.folder-item');
+      const targetFolderId = folderCard && folderCard.dataset.bookmarkId;
+      if (targetFolderId && targetFolderId !== state.fromFolderId) {
+        resetDnD();
+        moveBookmarkTo(state.id, { parentId: targetFolderId });
+        return;
+      }
+      if (nestedTarget && nestedTarget.dataset.parentId === state.fromFolderId && state.insertTarget) {
+        const targetCard = getNestedCards(nestedTarget.parentElement)
+          .find(item => item.dataset.bookmarkId === state.insertTarget.bookmarkId);
+        const cardIndex = targetCard ? Number(targetCard.dataset.siblingIndex) : -1;
+        if (Number.isInteger(cardIndex) && cardIndex >= 0) {
+          const dropIndex = computeDropIndex(state.fromIndex, cardIndex, state.insertTarget.position);
+          resetDnD();
+          if (dropIndex !== state.fromIndex) {
+            moveBookmarkTo(state.id, {
+              parentId: state.fromFolderId,
+              index: normalizeMoveIndex(state.fromIndex, dropIndex, true)
+            });
+          }
+          return;
+        }
+      }
+      resetDnD();
+      return;
+    }
+
     const folderCard = e.target.closest('.folder-item');
     const folderTargetId = folderCard && folderCard.dataset.bookmarkId;
 
@@ -835,7 +929,8 @@ function createBookmarkElement(bookmark) {
   listItem.dataset.bookmarkId = bookmark.id;
   currentRenderData.set(bookmark.id, bookmark);
 
-  const dragHandle = `<button class="bookmark-drag-handle" type="button" draggable="true" title="${escapeHtml(t('dragBookmarkHint'))}" aria-label="${escapeHtml(t('dragBookmarkHint'))}"><span aria-hidden="true">⠿</span></button>`;
+  const dragHint = bookmark.url ? t('dragBookmarkHint') : t('dragFolderHint');
+  const dragHandle = `<button class="bookmark-drag-handle" type="button" draggable="true" title="${escapeHtml(dragHint)}" aria-label="${escapeHtml(dragHint)}"><span aria-hidden="true">⠿</span></button>`;
   
   if (!bookmark.url) { // 文件夹没有URL属性
     // 文件夹
@@ -860,7 +955,7 @@ function createBookmarkElement(bookmark) {
       // 过滤出书签（不包括文件夹）
       const bookmarkChildren = children.filter(child => !child.children);
       
-      // 仅选出预览所需的高频书签，避免对大型文件夹全量排序。
+      // 访问频率高的书签优先；频次相同时由稳定排序保留文件夹中的原始顺序。
       const previewItems = bookmarkUsageManager.sortBookmarksByUsage(bookmarkChildren, previewCount);
       previewItems.forEach(child => {
         const nestedItem = document.createElement('li');
@@ -884,6 +979,7 @@ function createBookmarkElement(bookmark) {
         }
         
         nestedItem.innerHTML = `
+          <button class="bookmark-drag-handle" type="button" draggable="true" title="${escapeHtml(t('dragNestedBookmarkHint'))}" aria-label="${escapeHtml(t('dragNestedBookmarkHint'))}"><span aria-hidden="true">⠿</span></button>
           <a href="${isDangerousUrl(child.url) ? '#' : escapeHtml(child.url)}" class="bookmark-link" title="${escapeHtml(tooltipText)}">
             <img src="${nestedFaviconUrl}" class="favicon" alt="">
             <span class="bookmark-title">${escapeHtml(child.title)}</span>
@@ -893,6 +989,8 @@ function createBookmarkElement(bookmark) {
         
         // 登记到委托数据映射（点击/右键/favicon 兜底由容器统一委托处理）
         nestedItem.dataset.bookmarkId = child.id;
+        nestedItem.dataset.parentId = bookmark.id;
+        nestedItem.dataset.siblingIndex = String(children.indexOf(child));
         currentRenderData.set(child.id, child);
         
         nestedList.appendChild(nestedItem);

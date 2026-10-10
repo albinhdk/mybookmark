@@ -124,20 +124,8 @@ class BookmarkUsageManager {
       const aUsage = this.getUsageCount(a.id);
       const bUsage = this.getUsageCount(b.id);
       
-      // 首先按使用次数排序（降序）
-      if (aUsage !== bUsage) {
-        return bUsage - aUsage;
-      }
-      
-      // 如果使用次数相同，按最后使用时间排序（降序）
-      const aLastUsed = this.getLastUsed(a.id);
-      const bLastUsed = this.getLastUsed(b.id);
-      if (aLastUsed !== bLastUsed) {
-        return bLastUsed - aLastUsed;
-      }
-      
-      // 如果都没有使用记录，按标题排序
-      return a.title.localeCompare(b.title);
+      // 仅按访问次数降序；次数相同时返回 0，由稳定排序保留文件夹原始顺序。
+      return bUsage - aUsage;
     };
 
     if (!Number.isInteger(limit) || limit < 0 || limit >= bookmarks.length) {

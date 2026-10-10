@@ -308,7 +308,7 @@ const BookmarkChecker = {
     document.getElementById('checker-recheck-btn').addEventListener('click', () => this.recheckInvalid());
     document.getElementById('checker-restore-btn').addEventListener('click', () => this.restoreBackup());
 
-    // 点击结果网址时在独立浏览器窗口打开，保留检查结果页。
+    // 点击结果网址时在当前浏览器窗口的新标签页打开，保留检查结果页。
     const resultsTable = newDialog.querySelector('.checker-table');
     if (resultsTable) {
       resultsTable.addEventListener('click', (event) => {
@@ -318,8 +318,8 @@ const BookmarkChecker = {
 
         const url = link.getAttribute('href');
         if (!url || url === '#' || (typeof isDangerousUrl === 'function' && isDangerousUrl(url))) return;
-        if (typeof chrome !== 'undefined' && chrome.windows && typeof chrome.windows.create === 'function') {
-          chrome.windows.create({ url, focused: true }, () => {
+        if (typeof chrome !== 'undefined' && chrome.tabs && typeof chrome.tabs.create === 'function') {
+          chrome.tabs.create({ url, active: true }, () => {
             if (chrome.runtime && chrome.runtime.lastError) {
               console.error('打开书签失败:', chrome.runtime.lastError.message);
             }
