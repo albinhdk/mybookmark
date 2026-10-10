@@ -6,6 +6,8 @@
 
 MyBookmark 是一个旨在改善 Chrome 浏览器原生书签栏使用体验的扩展程序项目。它将传统的单行书签布局升级为多行网格布局，充分利用屏幕空间，从而大大提升书签的查找和使用效率。
 
+📦 **已上架 Microsoft Edge 加载项商店**：[Bookmark Viewer](https://microsoftedge.microsoft.com/addons/detail/bookmark-viewer/npddjihfkljcegccbchiioiiljbeclhc)
+
 ### ✨ 核心功能
 
 - **多行网格排版**：将书签栏从单行改为智能网格排列，自动适应屏幕尺寸。
