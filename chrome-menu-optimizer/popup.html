@@ -238,6 +238,51 @@
         width: 100%;
       }
 
+      /* 书签和文件夹仅通过独立手柄拖动，避免链接点击和排序手势冲突。 */
+      .bookmark-item > .bookmark-link {
+        box-sizing: border-box;
+        padding-right: 28px;
+      }
+
+      .bookmark-drag-handle {
+        position: absolute;
+        z-index: 1;
+        top: 8px;
+        right: 8px;
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        border: 1px solid transparent;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--text-secondary);
+        cursor: grab;
+        font: inherit;
+        line-height: 1;
+        opacity: 0.55;
+        user-select: none;
+        -webkit-user-drag: element;
+      }
+
+      .bookmark-item:hover .bookmark-drag-handle,
+      .bookmark-drag-handle:focus-visible {
+        opacity: 1;
+      }
+
+      .bookmark-drag-handle:hover,
+      .bookmark-drag-handle:focus-visible {
+        border-color: var(--border-color);
+        background: var(--background-color);
+        color: var(--primary-color);
+        outline: none;
+      }
+
+      .bookmark-drag-handle:active {
+        cursor: grabbing;
+      }
+
       /* 键盘导航焦点样式 */
       .bookmark-link.keyboard-focus {
         outline: 2px solid var(--primary-color);
@@ -297,6 +342,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
+        padding-right: 28px;
         cursor: pointer;
         color: var(--text-primary);
       }
@@ -368,9 +414,7 @@
       }
 
       /* ===== 拖拽移动 ===== */
-      .bookmark-item {
-        cursor: grab;
-      }
+      .bookmark-item { cursor: pointer; }
 
       /* 被拖项置灰（保留布局，避免拖动过程中网格重排导致插入指示跳动） */
       .bookmark-item.dnd-dragging {

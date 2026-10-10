@@ -118,9 +118,9 @@ class BookmarkUsageManager {
     await this._writeNow();
   }
 
-  // 根据使用频率排序书签
-  sortBookmarksByUsage(bookmarks) {
-    return bookmarks.sort((a, b) => {
+  // 根据使用频率排序书签；传入 limit 时只返回排序靠前的项目，避免为小型预览全量排序。
+  sortBookmarksByUsage(bookmarks, limit) {
+    const compare = (a, b) => {
       const aUsage = this.getUsageCount(a.id);
       const bUsage = this.getUsageCount(b.id);
       
@@ -138,7 +138,28 @@ class BookmarkUsageManager {
       
       // 如果都没有使用记录，按标题排序
       return a.title.localeCompare(b.title);
-    });
+    };
+
+    if (!Number.isInteger(limit) || limit < 0 || limit >= bookmarks.length) {
+      return bookmarks.sort(compare);
+    }
+
+    // 有序插入前 limit 项，等价于完整稳定排序后取前 limit 项，复杂度为 O(n * limit)。
+    const topBookmarks = [];
+    for (const bookmark of bookmarks) {
+      let low = 0;
+      let high = topBookmarks.length;
+      while (low < high) {
+        const middle = (low + high) >> 1;
+        if (compare(bookmark, topBookmarks[middle]) < 0) high = middle;
+        else low = middle + 1;
+      }
+      if (low < limit) {
+        topBookmarks.splice(low, 0, bookmark);
+        if (topBookmarks.length > limit) topBookmarks.pop();
+      }
+    }
+    return topBookmarks;
   }
 
   // 获取使用统计摘要

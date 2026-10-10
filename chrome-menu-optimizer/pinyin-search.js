@@ -75,6 +75,30 @@ const polyphonicMap = {
 };
 // 合并：多音字覆盖单读音
 Object.assign(pinyinMap, polyphonicMap);
+const HAS_CJK_CHAR = /[\u3400-\u9fff]/;
+const PINYIN_CACHE_LIMIT = 4096;
+const pinyinSearchCache = new Map();
+
+// 搜索输入变化时复用文本派生出的拼音数据；Map 顺序用于实现有界 LRU。
+function getPinyinSearchIndex(text, lowerText) {
+  const cached = pinyinSearchCache.get(text);
+  if (cached) {
+    pinyinSearchCache.delete(text);
+    pinyinSearchCache.set(text, cached);
+    return cached;
+  }
+
+  const index = {
+    lowerText,
+    initials: toPinyinInitials(text).toLowerCase(),
+    fullPinyin: getFullPinyinVariants(text).map(variant => variant.toLowerCase())
+  };
+  pinyinSearchCache.set(text, index);
+  if (pinyinSearchCache.size > PINYIN_CACHE_LIMIT) {
+    pinyinSearchCache.delete(pinyinSearchCache.keys().next().value);
+  }
+  return index;
+}
 
 // 获取一个汉字的全部读音（无读音返回空数组）
 function getPinyinReadings(char) {
@@ -125,17 +149,32 @@ function getFullPinyinVariants(text) {
 
 // 增强的搜索匹配函数
 function isSearchMatch(text, searchTerm) {
-  const textLower = text.toLowerCase();
+  const hasCjk = HAS_CJK_CHAR.test(text);
+  let cachedPinyinIndex = null;
+  if (hasCjk) {
+    cachedPinyinIndex = pinyinSearchCache.get(text) || null;
+    if (cachedPinyinIndex) {
+      pinyinSearchCache.delete(text);
+      pinyinSearchCache.set(text, cachedPinyinIndex);
+    }
+  }
+  const textLower = cachedPinyinIndex ? cachedPinyinIndex.lowerText : text.toLowerCase();
   const searchLower = searchTerm.toLowerCase();
   
   // 1. 直接文本匹配
   if (textLower.includes(searchLower)) {
     return true;
   }
+
+  // 纯拉丁/数字等文本无需逐字查拼音表，也无需生成全拼组合；
+  // 保留首字母子序列匹配（例如 "gh" 可匹配 "github"）。
+  if (!hasCjk) {
+    return matchPinyinInitials(text, searchLower);
+  }
   
   // 2. 拼音首字母匹配（两种策略都覆盖：拼接串包含 + 逐字符任选读音）
-  const pinyinInitials = toPinyinInitials(text);
-  if (pinyinInitials.toLowerCase().includes(searchLower)) {
+  const pinyinIndex = cachedPinyinIndex || getPinyinSearchIndex(text, textLower);
+  if (pinyinIndex.initials.includes(searchLower)) {
     return true;
   }
   if (matchPinyinInitials(text, searchLower)) {
@@ -143,8 +182,7 @@ function isSearchMatch(text, searchTerm) {
   }
   
   // 3. 拼音全拼匹配（任一读音组合包含）
-  const fullPinyinVariants = getFullPinyinVariants(text);
-  if (fullPinyinVariants.some(v => v.toLowerCase().includes(searchLower))) {
+  if (pinyinIndex.fullPinyin.some(variant => variant.includes(searchLower))) {
     return true;
   }
   

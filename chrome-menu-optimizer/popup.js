@@ -2,6 +2,7 @@
 let currentFolderId = null; // 初始为null，动态获取
 let searchTerm = '';
 let currentTargetNodeId = null;
+let searchRequestId = 0;
 
 // 国际化取词（i18n.js 必须先于本文件加载；缺失时退化为直接返回 key）
 var t = (typeof window !== 'undefined' && window.BMV && window.BMV.i18n) ? window.BMV.i18n.t : function (key) { return key; };
@@ -11,6 +12,7 @@ const FALLBACK_FAVICON = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdo
 
 // 分批渲染每批数量与委托数据映射
 const RENDER_BATCH = 100;
+const SEARCH_FILTER_BATCH = 500;
 let currentRenderData = new Map(); // id -> bookmark，供事件委托查找
 let pendingLoadMore = null;        // 当前"加载更多"按钮对应的回调
 
@@ -148,6 +150,7 @@ function setupEventListeners() {
   let searchDebounceTimer = null;
   searchBox.addEventListener('input', function() {
     searchTerm = this.value.trim();
+    searchRequestId++; // 输入变化时立即取消正在扫描或渲染的旧搜索
     clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(async () => {
       if (searchTerm) {
@@ -180,6 +183,7 @@ function setupEventListeners() {
       if (searchBox.value) {
         searchBox.value = '';
         searchTerm = '';
+        searchRequestId++;
         clearTimeout(searchDebounceTimer);
         renderBookmarks(currentFolderId);
       }
@@ -300,8 +304,7 @@ function setupBookmarksDelegation() {
 // 交互：书签/文件夹卡片均可拖动 —— 拖到文件夹卡片上=移入该文件夹；
 // 在当前网格内拖动=排序；面包屑目录项也是放置目标（拖到哪层就移到哪层）。
 // 事件全部冒泡，统一委托在 #bookmarks 容器上，监听器 O(1)。
-// 卡片内 <a> 会隐式成为拖拽源，dragstart 的 target 可能是链接本身，
-// 因此一律用 e.target.closest('.bookmark-item') 定位卡片。
+// 卡片仅允许专用 .bookmark-drag-handle 启动拖拽；链接仍由容器单独处理点击。
 let dndState = null; // { id, isFolder, fromFolderId, fromIndex, insertTarget?, folderDropId?, crumbDropId? }
 
 // 同父排序的 index 归一化。chrome.bookmarks.move 的 index 以"移除前"数组为基准，
@@ -372,7 +375,11 @@ function setupDragAndDrop() {
   // 避免 dragging 卡片被过滤导致索引坐标系不一致）
   container.addEventListener('dragstart', function(e) {
     const card = e.target.closest('.bookmark-item');
-    if (!card) return;
+    const handle = e.target.closest('.bookmark-drag-handle');
+    if (!card || !handle || !card.contains(handle)) {
+      e.preventDefault();
+      return;
+    }
     const bookmark = currentRenderData.get(card.dataset.bookmarkId);
     if (!bookmark) return;
     const grid = card.closest('.bookmark-grid');
@@ -523,9 +530,9 @@ async function moveBookmarkTo(id, destination) {
 }
 
 // 渲染搜索结果（竞态防护 + 分批渲染）
-let searchRequestId = 0;
 async function renderSearchResults() {
   const requestId = ++searchRequestId;
+  const query = searchTerm;
   const bookmarksContainer = document.getElementById('bookmarks');
   
   // 搜索结果页隐藏视图设置行（设置只作用于网格视图）
@@ -541,10 +548,22 @@ async function renderSearchResults() {
     // 竞态防护：加载期间又有新搜索或切回文件夹视图时，丢弃本次过期响应
     if (requestId !== searchRequestId) return;
     
-    // 过滤书签（仅包含有URL的书签，排除文件夹）
-    const filteredBookmarks = allBookmarks.filter(bookmark => 
-        bookmark.url && (isSearchMatch(bookmark.title, searchTerm) || isSearchMatch(bookmark.url, searchTerm))
-      );
+    // 分段过滤并让出主线程，避免大型书签库阻塞弹窗交互。
+    const filteredBookmarks = [];
+    for (let start = 0; start < allBookmarks.length; start += SEARCH_FILTER_BATCH) {
+      if (requestId !== searchRequestId) return;
+      const end = Math.min(start + SEARCH_FILTER_BATCH, allBookmarks.length);
+      for (let index = start; index < end; index++) {
+        const bookmark = allBookmarks[index];
+        if (bookmark.url && (isSearchMatch(bookmark.title, query) || isSearchMatch(bookmark.url, query))) {
+          filteredBookmarks.push(bookmark);
+        }
+      }
+      if (end < allBookmarks.length) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
+    if (requestId !== searchRequestId) return;
     
     if (filteredBookmarks.length === 0) {
       bookmarksContainer.innerHTML = `
@@ -567,7 +586,7 @@ async function renderSearchResults() {
     const breadcrumbContainer = document.getElementById('breadcrumb');
     breadcrumbContainer.innerHTML = `
       <span>${t('breadcrumbSearchResultsLabel')}</span> 
-      <span class="search-term-highlight">${escapeHtml(searchTerm)}</span>
+      <span class="search-term-highlight">${escapeHtml(query)}</span>
     `;
     breadcrumbContainer.style.display = 'flex';
     
@@ -586,11 +605,26 @@ async function renderSearchResults() {
     let rendered = 0;
     const renderBatch = async () => {
       const slice = filteredBookmarks.slice(rendered, rendered + RENDER_BATCH);
-      for (const bookmark of slice) {
-        if (requestId !== searchRequestId) return; // 批次已过期，停止追加
-        const resultItem = await createSearchResultItem(bookmark);
-        resultsContainer.appendChild(resultItem);
-      }
+      if (requestId !== searchRequestId) return; // 批次已过期，停止追加
+
+      // 同批书签常来自相同文件夹：每个父文件夹只计算一次路径，并发准备结果项。
+      const parentIds = [...new Set(slice.map(bookmark => bookmark.parentId))];
+      const folderPaths = new Map(await Promise.all(parentIds.map(async parentId => [
+        parentId,
+        await BMV.bookmarkTree.getFolderPath(parentId)
+      ])));
+      const resultItems = await Promise.all(slice.map(bookmark =>
+        createSearchResultItem(bookmark, folderPaths.get(bookmark.parentId))
+      ));
+
+      // 异步准备期间可能开始了新搜索；过期批次不能污染当前映射或页面。
+      if (requestId !== searchRequestId) return;
+      const fragment = document.createDocumentFragment();
+      slice.forEach((bookmark, index) => {
+        currentRenderData.set(bookmark.id, bookmark);
+        fragment.appendChild(resultItems[index]);
+      });
+      resultsContainer.appendChild(fragment);
       rendered += slice.length;
       
       const existingMore = resultsContainer.querySelector('.load-more-item');
@@ -618,14 +652,10 @@ async function renderSearchResults() {
 }
 
 // 创建搜索结果项（事件由 #bookmarks 容器委托处理，此处只挂数据）
-async function createSearchResultItem(bookmark) {
+function createSearchResultItem(bookmark, folderPath) {
   const listItem = document.createElement('li');
   listItem.className = 'search-result-item';
   listItem.dataset.bookmarkId = bookmark.id;
-  currentRenderData.set(bookmark.id, bookmark);
-  
-  // 获取文件夹路径
-  const folderPath = await BMV.bookmarkTree.getFolderPath(bookmark.parentId);
   
   // 获取使用统计
   const usageCount = bookmarkUsageManager.getUsageCount(bookmark.id);
@@ -657,6 +687,7 @@ ${t('tooltipUsageCount', [usageText])}`;
 
 // 渲染书签
 async function renderBookmarks(folderId) {
+  searchRequestId++; // 切回文件夹视图时取消尚未完成的搜索
   const bookmarksContainer = document.getElementById('bookmarks');
   
   // 恢复视图设置行（搜索页会隐藏它）
@@ -802,8 +833,9 @@ async function updateBreadcrumb(folderId) {
 function createBookmarkElement(bookmark) {
   const listItem = document.createElement('li');
   listItem.dataset.bookmarkId = bookmark.id;
-  listItem.draggable = true; // 拖拽移动（事件委托见 setupDragAndDrop）
   currentRenderData.set(bookmark.id, bookmark);
+
+  const dragHandle = `<button class="bookmark-drag-handle" type="button" draggable="true" title="${escapeHtml(t('dragBookmarkHint'))}" aria-label="${escapeHtml(t('dragBookmarkHint'))}"><span aria-hidden="true">⠿</span></button>`;
   
   if (!bookmark.url) { // 文件夹没有URL属性
     // 文件夹
@@ -812,6 +844,7 @@ function createBookmarkElement(bookmark) {
       <div class="folder-title" data-folder-id="${bookmark.id}">
         ${escapeHtml(bookmark.title)}
       </div>
+      ${dragHandle}
     `;
     
     // 异步加载并显示文件夹预览（预览数由视图设置控制，0 表示不渲染）
@@ -827,11 +860,8 @@ function createBookmarkElement(bookmark) {
       // 过滤出书签（不包括文件夹）
       const bookmarkChildren = children.filter(child => !child.children);
       
-      // 按使用频率排序
-      const sortedBookmarks = bookmarkUsageManager.sortBookmarksByUsage(bookmarkChildren);
-      
-      // 显示前5个子项作为预览
-      const previewItems = sortedBookmarks.slice(0, previewCount);
+      // 仅选出预览所需的高频书签，避免对大型文件夹全量排序。
+      const previewItems = bookmarkUsageManager.sortBookmarksByUsage(bookmarkChildren, previewCount);
       previewItems.forEach(child => {
         const nestedItem = document.createElement('li');
         nestedItem.className = 'nested-item';
@@ -934,7 +964,8 @@ function createBookmarkElement(bookmark) {
           ${shouldShowPath ? `<div class="bookmark-path">${escapeHtml(folderPathText)}</div>` : ''}
         </div>
         ${usageCount > 0 ? `<span class="usage-count">${usageText}</span>` : ''}
-      </a>`
+      </a>
+      ${dragHandle}`
     ;
   }
   

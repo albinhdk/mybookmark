@@ -281,10 +281,22 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const getChildren = (id) => evalJs(`return new Promise(res => chrome.bookmarks.getChildren('${id}', c => res(c.map(n => n.title))));`);
   const itemId = (sel) => evalJs(`return Array.from(document.querySelectorAll('${sel}')).map(li => li.dataset.bookmarkId).join(',');`);
 
-  // L1 拖拽源置灰（等 transition: all 0.2s 过渡完再读计算样式）
+  // L1 只有专用手柄可启动拖拽，链接区域不再隐式成为拖拽源
+  const dragAffordance = await evalJs(`
+    const card = document.querySelector('.bookmark-item[data-bookmark-id="2"]');
+    const handle = card.querySelector('.bookmark-drag-handle');
+    const linkEvent = window.__dnd.fire(card.querySelector('.bookmark-link'), 'dragstart', 0, 0);
+    const linkBlocked = !card.classList.contains('dnd-dragging') && dndState === null;
+    const handleEvent = window.__dnd.fire(handle, 'dragstart', 0, 0);
+    return { cardDraggable: card.draggable, handleDraggable: handle.draggable, linkBlocked, dragging: card.classList.contains('dnd-dragging') };
+  `);
+  check('整张卡片不可拖动、专用手柄可拖动', dragAffordance.cardDraggable === false && dragAffordance.handleDraggable === true, JSON.stringify(dragAffordance));
+  check('从书签链接启动拖拽会被阻止', dragAffordance.linkBlocked === true, JSON.stringify(dragAffordance));
+
+  // L2 拖拽源置灰（等 transition: all 0.2s 过渡完再读计算样式）
   const ds = await evalJs(`
     const card = document.querySelector('.bookmark-item[data-bookmark-id="2"]');
-    window.__dnd.fire(card, 'dragstart', 0, 0);
+    window.__dnd.fire(card.querySelector('.bookmark-drag-handle'), 'dragstart', 0, 0);
     return { dragging: card.classList.contains('dnd-dragging') };
   `);
   check('dragstart 后被拖项标记', ds.dragging === true, JSON.stringify(ds));
@@ -292,7 +304,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const opacity = await evalJs(`return getComputedStyle(document.querySelector('.dnd-dragging')).opacity;`);
   check('被拖项视觉置灰（opacity < 1）', parseFloat(opacity) < 1, opacity);
 
-  // L2 悬停文件夹卡片 = 拖入高亮
+  // L3 悬停文件夹卡片 = 拖入高亮
   // 注：合成 DragEvent 下 dataTransfer.dropEffect 赋值不会生效（真实拖拽中正常），
   // 放置反馈以 class 断言为准
   const over = await evalJs(`
@@ -302,7 +314,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   `);
   check('悬停文件夹卡片高亮为"拖入"目标', over.cls.includes('dnd-drop-into'), JSON.stringify(over));
 
-  // L3 拖到自己头上：无放置反馈
+  // L4 拖到自己头上：无放置反馈
   const selfOver = await evalJs(`
     const c = window.__dnd.center('.bookmark-item[data-bookmark-id="2"]');
     const res = window.__dnd.fire(document.querySelector('.bookmark-item[data-bookmark-id="2"]'), 'dragover', c.x, c.y);
@@ -310,7 +322,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   `);
   check('拖到自己头上无放置反馈', !selfOver.cls.includes('dnd-drop-into') && !selfOver.cls.includes('dnd-drop-invalid'), JSON.stringify(selfOver));
 
-  // L4 松手 → 开发工具 移入 搜索引擎，当前视图刷新
+  // L5 松手 → 开发工具 移入 搜索引擎，当前视图刷新
   await evalJs(`
     const c = window.__dnd.center('.bookmark-item[data-bookmark-id="6"]');
     window.__dnd.fire(document.querySelector('.bookmark-item[data-bookmark-id="6"]'), 'drop', c.x, c.y);
@@ -321,9 +333,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const barAfterMove = await itemId('.bookmark-item:not(.dnd-dragging)');
   check('移出后当前视图刷新（剩 3 项）', barAfterMove === '6,9,10', barAfterMove);
 
-  // L5 网格内排序：YouTube(9) 拖到 Wikipedia(10) 右半侧 → 插入其后
+  // L6 网格内排序：YouTube(9) 拖到 Wikipedia(10) 右半侧 → 插入其后
   const reorder = await evalJs(`
-    window.__dnd.fire(document.querySelector('.bookmark-item[data-bookmark-id="9"]'), 'dragstart', 0, 0);
+    window.__dnd.fire(document.querySelector('.bookmark-item[data-bookmark-id="9"] .bookmark-drag-handle'), 'dragstart', 0, 0);
     const wiki = document.querySelector('.bookmark-item[data-bookmark-id="10"]');
     const r = wiki.getBoundingClientRect();
     const res = window.__dnd.fire(wiki, 'dragover', r.right - 5, r.top + r.height / 2);
@@ -339,13 +351,13 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await waitFor(async () => (await getChildren('1')).join(',') === '搜索引擎,Wikipedia,YouTube', 5000, '排序落定');
   check('同父排序：YouTube 移到 Wikipedia 之后（实证 index 语义）', (await getChildren('1')).join(',') === '搜索引擎,Wikipedia,YouTube', (await getChildren('1')).join(','));
 
-  // L6 面包屑放置：进入 搜索引擎 › 开发工具，拖 GitHub 到面包屑"搜索引擎"项
+  // L7 面包屑放置：进入 搜索引擎 › 开发工具，拖 GitHub 到面包屑"搜索引擎"项
   await evalJs(`document.querySelector('.bookmark-item[data-bookmark-id="6"] .folder-title').click(); return true;`);
   await waitFor(() => evalJs(`return !!document.querySelector('.bookmark-item[data-bookmark-id="2"]');`), 5000, '进入搜索引擎');
   await evalJs(`document.querySelector('.bookmark-item[data-bookmark-id="2"] .folder-title').click(); return true;`);
   await waitFor(() => evalJs(`return !!document.querySelector('.bookmark-item[data-bookmark-id="3"]');`), 5000, '进入开发工具');
   const crumb = await evalJs(`
-    window.__dnd.fire(document.querySelector('.bookmark-item[data-bookmark-id="3"]'), 'dragstart', 0, 0);
+    window.__dnd.fire(document.querySelector('.bookmark-item[data-bookmark-id="3"] .bookmark-drag-handle'), 'dragstart', 0, 0);
     const link = document.querySelector('#breadcrumb a[data-folder-id="6"]');
     const r = link.getBoundingClientRect();
     const res = window.__dnd.fire(link, 'dragover', r.left + 5, r.top + r.height / 2);
@@ -361,13 +373,13 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await waitFor(async () => (await getChildren('6')).includes('GitHub'), 5000, 'GitHub 移入搜索引擎');
   check('拖到面包屑：GitHub 移入 搜索引擎', (await getChildren('6')).includes('GitHub'), (await getChildren('6')).join(','));
 
-  // L7 守卫（视图停在"开发工具"内，面包屑为 书签栏 › 搜索引擎 › 开发工具）：
+  // L8 守卫（视图停在"开发工具"内，面包屑为 书签栏 › 搜索引擎 › 开发工具）：
   // ① 拖到当前所在目录=原地放下，无反馈；② 循环校验在页面内真实生效。
   // 注：单层网格 UI 里"文件夹拖入自己后代"的目标永不同屏（卡片只在父级可见、后代
   // 只在其内部可见），UI 层不可达；该路径由 dnd.test.js 单元测试直接覆盖，这里
   // 断言真实挂载的 isSelfOrAncestorOf（此时 搜索引擎 已是 开发工具 的祖先）。
   const guard = await evalJs(`
-    window.__dnd.fire(document.querySelector('.bookmark-item[data-bookmark-id="4"]'), 'dragstart', 0, 0);
+    window.__dnd.fire(document.querySelector('.bookmark-item[data-bookmark-id="4"] .bookmark-drag-handle'), 'dragstart', 0, 0);
     const link = document.querySelector('#breadcrumb a[data-folder-id="2"]');
     const r = link.getBoundingClientRect();
     const res = window.__dnd.fire(link, 'dragover', r.left + 5, r.top + r.height / 2);
@@ -376,7 +388,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   check('拖到当前所在目录（原地）无放置反馈', !guard.crumb.includes('dnd-crumb-drop'), JSON.stringify(guard));
   check('循环守卫在页面内生效（搜索引擎 是 开发工具 祖先）', guard.cycle === true, JSON.stringify(guard));
 
-  // L8 dragend 复位 + 搜索结果项不参与拖拽
+  // L9 dragend 复位 + 搜索结果项不参与拖拽
   const ended = await evalJs(`
     const card = document.querySelector('.bookmark-item[data-bookmark-id="4"]');
     window.__dnd.fire(card, 'dragend', 0, 0);
@@ -410,6 +422,20 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const checkerSummary = await evalJs(`return { dialog: !!document.getElementById('checker-dialog'), summary: (document.querySelector('.checker-summary')?.textContent || '').trim(), recheck: !!document.getElementById('checker-recheck-btn'), restore: !!document.getElementById('checker-restore-btn') };`);
   check('结果对话框含统计/重新检查/恢复备份', checkerSummary.dialog === true && checkerSummary.recheck === true && checkerSummary.restore === true, JSON.stringify(checkerSummary));
   check('统计行包含有效计数', /有效/.test(checkerSummary.summary), checkerSummary.summary);
+  const checkerInteractions = await evalJs(`
+    const dialog = document.getElementById('checker-dialog');
+    dialog.querySelector('.checker-overlay').click();
+    const remainsAfterOverlay = !!document.getElementById('checker-dialog');
+    const link = document.querySelector('.checker-td-url a[href^="http"]');
+    let createdWindow = null;
+    const originalWindows = chrome.windows;
+    chrome.windows = { create: (options, callback) => { createdWindow = options; if (callback) callback(); } };
+    if (link) link.click();
+    chrome.windows = originalWindows;
+    return { remainsAfterOverlay, createdWindow, linkUrl: link && link.getAttribute('href') };
+  `);
+  check('点击检查结果空白遮罩不关闭对话框', checkerInteractions.remainsAfterOverlay === true, JSON.stringify(checkerInteractions));
+  check('点击结果网址通过 windows.create 打开独立窗口', !!checkerInteractions.createdWindow && checkerInteractions.createdWindow.url === checkerInteractions.linkUrl, JSON.stringify(checkerInteractions.createdWindow));
 
   console.log('[K] 无控制台错误');
   check('加载与交互全程无 JS 错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));

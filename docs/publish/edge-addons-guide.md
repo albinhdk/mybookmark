@@ -6,6 +6,7 @@
 |---|---|---|
 | 2.0 | 首个提交（favicon 修复后打包） | ✅ 已上架（In the Store，2026-10-01） |
 | 2.1 | 国际化（zh/en 自动切换）+ manifest description 本地化 | ✅ 已提交，审核中（In review，2026-10-03；双 listing zh-CN + en-US 已填妥） |
+| 2.2 | 搜索/文件夹预览性能优化；检查器遮罩点击与网址打开行为修正 | 已打包，待 Partner Center 提交（2026-10-10） |
 
 > 2.1 提交流程：等 2.0 审核通过并上架后，在 Partner Center 上传 2.1 包提交更新；
 > 或取消 2.0  submission 直接用 2.1 重新提交（已安装用户不受影响）。
@@ -18,7 +19,7 @@
 > 开发者后台：https://partner.microsoft.com/dashboard/microsoftedge/public/login
 >
 > **材料清单（全部已备好）**：
-> - 包：`dist/bookmark-viewer-2.0-edge.zip`（manifest description 保持短描述——Edge 包校验 schema 限制 ≤132 字符，实测 467 字符会被拒）
+> - 当前待提交包：`dist/bookmark-viewer-2.2-edge.zip`（manifest description 保持短描述——Edge 包校验 schema 限制 ≤132 字符，实测 467 字符会被拒）
 > - Logo：`docs/publish/screenshots/logo-300.png`（300×300，1:1）
 > - 截图（均为精确 1280×800）：`popup-grid.png`、`popup-pinyin-search.png`、`checker.png`
 > - 隐私政策文案：`docs/publish/privacy-policy.md`（需先部署到公网 URL）
@@ -54,7 +55,7 @@ Edge 商店要求：扩展访问了隐私数据（书签）就必须提供隐私
 ## 第 2 步：创建扩展并上传包
 
 1. 进入 Edge 工作区，点 **Create new extension**（+ 号）。
-2. 把 `dist/bookmark-viewer-2.0-edge.zip` 拖到上传区，等校验通过。
+2. 把 `dist/bookmark-viewer-2.2-edge.zip` 拖到上传区，等校验通过。
 3. 依次点左侧 **Extension overview** → **Packages** → **Continue**。
 
 ## 第 3 步：Availability（可见性/市场）

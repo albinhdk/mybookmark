@@ -205,7 +205,6 @@ const BookmarkChecker = {
         </div>
       </div>`;
     document.body.appendChild(dialog);
-    dialog.querySelector('.checker-overlay').addEventListener('click', () => this.cancelCheck());
     document.getElementById('checker-cancel-btn').addEventListener('click', () => this.cancelCheck());
   },
 
@@ -305,10 +304,31 @@ const BookmarkChecker = {
     document.body.appendChild(newDialog);
 
     // 事件绑定
-    newDialog.querySelector('.checker-overlay').addEventListener('click', () => this.closeDialog());
     document.getElementById('checker-close-btn').addEventListener('click', () => this.closeDialog());
     document.getElementById('checker-recheck-btn').addEventListener('click', () => this.recheckInvalid());
     document.getElementById('checker-restore-btn').addEventListener('click', () => this.restoreBackup());
+
+    // 点击结果网址时在独立浏览器窗口打开，保留检查结果页。
+    const resultsTable = newDialog.querySelector('.checker-table');
+    if (resultsTable) {
+      resultsTable.addEventListener('click', (event) => {
+        const link = event.target.closest && event.target.closest('.checker-td-url a');
+        if (!link) return;
+        event.preventDefault();
+
+        const url = link.getAttribute('href');
+        if (!url || url === '#' || (typeof isDangerousUrl === 'function' && isDangerousUrl(url))) return;
+        if (typeof chrome !== 'undefined' && chrome.windows && typeof chrome.windows.create === 'function') {
+          chrome.windows.create({ url, focused: true }, () => {
+            if (chrome.runtime && chrome.runtime.lastError) {
+              console.error('打开书签失败:', chrome.runtime.lastError.message);
+            }
+          });
+        } else {
+          window.open(url, '_blank', 'noopener,noreferrer');
+        }
+      });
+    }
 
     // 批量操作事件
     this._bindBulkActions();
